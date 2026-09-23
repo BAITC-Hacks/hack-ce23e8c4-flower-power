@@ -307,13 +307,41 @@ def test_complete_activity_raises_level_and_updates_recommendations(dataset: Dat
     assert effective_skills(ds, "T0001")["SK_SYSTEM_DESIGN"] == 1  # the original dataset is unchanged
 
 
-def test_complete_recurring_club_twice_adds_two_records(dataset: Dataset) -> None:
-    ds = dataset.with_additions([make_employee(dataset, skills={})], [])
+def test_recurring_club_counts_each_session_once(dataset: Dataset) -> None:
+    # One earlier session after the review and one marked today: two gains. A second click today is rejected.
+    ds = with_history(dataset, make_employee(dataset, skills={}), [(RECURRING_EVENT_ID, "2026-07-08", "completed")])
 
-    updated = complete_activity(complete_activity(ds, "T0001", RECURRING_EVENT_ID), "T0001", RECURRING_EVENT_ID)
+    updated = complete_activity(ds, "T0001", RECURRING_EVENT_ID)
 
-    assert len(updated.history_for("T0001")) == 2
     assert effective_skills(updated, "T0001")["SK_PUBLIC_SPEAKING"] == 2
+    with pytest.raises(DatasetError, match="on 2026-10-01"):
+        complete_activity(updated, "T0001", RECURRING_EVENT_ID)
+
+
+def test_duplicate_completion_rows_on_one_day_count_once(dataset: Dataset) -> None:
+    employee = make_employee(dataset, skills={})
+    rows = [(RECURRING_EVENT_ID, "2026-07-08", "completed"), (RECURRING_EVENT_ID, "2026-07-08", "completed")]
+
+    assert effective_skills(with_history(dataset, employee, rows), "T0001")["SK_PUBLIC_SPEAKING"] == 1
+
+
+def test_completion_counts_when_review_is_dated_today(dataset: Dataset) -> None:
+    employee = make_employee(dataset, skills={"SK_SYSTEM_DESIGN": 1}).model_copy(
+        update={"last_review_date": dataset.as_of_date}
+    )
+    ds = dataset.with_additions([employee], [])
+
+    updated = complete_activity(ds, "T0001", "EV_005")
+
+    assert effective_skills(updated, "T0001")["SK_SYSTEM_DESIGN"] == 2
+
+
+def test_uploaded_completion_on_review_day_is_not_applied_twice(dataset: Dataset) -> None:
+    # A regular record dated on the review day is already part of the reviewed level.
+    employee = make_employee(dataset, skills={"SK_SYSTEM_DESIGN": 1})
+    ds = with_history(dataset, employee, [("EV_005", REVIEW_DATE.isoformat(), "completed")])
+
+    assert effective_skills(ds, "T0001")["SK_SYSTEM_DESIGN"] == 1
 
 
 @pytest.mark.parametrize(
