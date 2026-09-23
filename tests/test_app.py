@@ -107,3 +107,40 @@ def test_club_completion_button_is_disabled_after_one_record_today(app: AppTest)
         if record.event_id == "EV_036" and record.session_date == app.session_state["dataset"].as_of_date
     ]
     assert len(records) == 1
+
+
+def test_friendly_labels_preserve_original_levels_and_codes(app: AppTest) -> None:
+    app.run()
+    dataset = app.session_state["dataset"]
+    levels = effective_skills(dataset, dataset.employees[0].employee_id)
+    tables = [frame.value for frame in app.dataframe if "Код" in frame.value.columns]
+    assert len(tables) == 1
+    for _, row in tables[0].iterrows():
+        assert row["Сейчас"] == levels.get(row["Код"], 0)
+        assert row["Исходное название"] == dataset.skill(row["Код"]).name
+    assert any('title="Уровень ' in item.value for item in app.markdown)
+    assert any(header.value == "Ваш сад навыков" for header in app.subheader)
+    assert not any(expander.label == "Настройка AI" for expander in app.expander)
+
+
+def test_ai_explanation_is_requested_only_once(app: AppTest, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def fake_explain(rec: object, employee: object, language: str) -> str:
+        del rec, employee
+        calls.append(language)
+        return "Сохранённое объяснение"
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-a-real-key")
+    monkeypatch.setattr("career_quest.explain.explain", fake_explain)
+    app.run()
+    assert not calls
+    button = next(button for button in app.button if button.label == "Объяснить с AI")
+    key = button.key
+    assert key is not None
+    button.click().run()
+    assert calls == ["ru"]
+    assert app.button(key=key).disabled
+    app.run()
+    assert calls == ["ru"]
+    assert any(text.value == "Сохранённое объяснение" for text in app.text)
