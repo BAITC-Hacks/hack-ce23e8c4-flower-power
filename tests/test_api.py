@@ -243,3 +243,28 @@ def test_team_lead_dialogue_keeps_unconfirmed_goal_separate(client: TestClient) 
     assert followup["details"] == first["details"]
     assert "EV_" not in followup["text"]
     assert client.get("/api/employees/E0001").json()["employee"]["goal"] == original
+
+
+def test_activity_chats_are_scoped_to_each_recommendation(client: TestClient) -> None:
+    login(client, role="employee")
+    recs = client.get("/api/employees/E0001").json()["recommendations"]
+    assert len(recs) >= 2
+    first, second = recs[:2]
+    for rec in (first, second):
+        result = client.post(
+            "/api/employees/E0001/assistant",
+            json={"wish": "Почему мне подходит это занятие?", "event_id": rec["event_id"]},
+        )
+        assert result.status_code == 200
+        assert rec["original_title"] in result.json()["details"]
+        other = second if rec == first else first
+        assert other["event_id"] not in result.json()["details"]
+    session = next(iter(api._SESSIONS.values()))
+    assert len(session.dialogue) == 2
+    assert all(len(history) == 2 for history in session.dialogue.values())
+
+
+def test_activity_chat_rejects_unrecommended_event(client: TestClient) -> None:
+    login(client, role="employee")
+    response = client.post("/api/employees/E0001/assistant", json={"wish": "Почему?", "event_id": "EV_UNKNOWN"})
+    assert response.status_code == 404

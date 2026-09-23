@@ -225,3 +225,9 @@ tr:last-child td { border-bottom: 0; }
   .hero { flex-direction: column; align-items: flex-start; }
   .grid-2 { grid-template-columns: 1fr; }
 }
+
+.activity-chat { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
+.chat-messages { display: grid; gap: 10px; max-height: 420px; overflow-y: auto; margin: 12px 0; }
+.chat-form { display: grid; gap: 10px; }
+.chat-form textarea { display: block; width: 100%; margin-top: 6px; resize: vertical; }
+.chat-form button { justify-self: start; }

@@ -8,10 +8,7 @@ const state = {
   profileId: null,
   hr: null,
   lang: "ru",
-  explanations: {},
-  suggestion: undefined,
-  dialogue: [],
-  wish: "",
+  chats: {},
   loginRole: "employee",
   busy: "",
 };
@@ -93,10 +90,7 @@ async function loadSession() {
 }
 
 async function loadProfile(id) {
-  state.explanations = {};
-  state.suggestion = undefined;
-  state.dialogue = [];
-  state.wish = "";
+  state.chats = {};
   state.profile = await api(`/api/employees/${encodeURIComponent(id)}`);
   state.profileId = id;
 }
@@ -130,9 +124,7 @@ async function render() {
       if (state.profileId !== id || !state.profile) {
         if (state.profileId !== id) {
           // The dialogue belongs to one profile: never show it on another person's page.
-          state.dialogue = [];
-          state.wish = "";
-          state.suggestion = undefined;
+          state.chats = {};
         }
         await loadProfile(id);
       }
@@ -227,10 +219,10 @@ function employeeView() {
       <p>${h(employee.department)} · ${h(employee.role_label)} · стаж ${employee.tenure_months} мес.</p>
     </div></div>
     ${heroView(employee, quest, own)}
-    ${own ? coachView() : hrGoalNote(employee)}
+    ${own ? "" : hrGoalNote(employee)}
     <div class="row" style="justify-content:space-between;margin-top:34px">
       <h2 style="margin:0">${own ? "Ваш следующий шаг" : "Рекомендованные шаги сотрудника"}</h2>
-      <label class="row small muted">Язык AI-объяснения
+      <label class="row small muted">Язык ответа AI
         <select class="input" style="width:auto;padding:6px 10px" data-action="lang">
           ${[["ru", "Русский"], ["kk", "Қазақша"], ["en", "English"]]
             .map(([code, label]) => `<option value="${code}" ${state.lang === code ? "selected" : ""}>${label}</option>`)
@@ -275,45 +267,42 @@ function heroView(employee, quest, own) {
   </section>`;
 }
 
-function coachView() {
-  const s = state.suggestion;
-  let result = "";
-  if (s === null) result = '<div class="suggestion">Не нашли подходящую роль в справочнике. Назовите направление или уровень.</div>';
-  if (s) {
-    result = `<div class="suggestion">
-      <div class="small muted">Предлагаемая цель · подобрано ${s.source === "ai" ? "AI" : "по ключевым словам (без AI)"}</div>
-      <div style="font-weight:800;font-size:18px;margin:4px 0">${h(s.label)}</div>
-      <div class="small">${h(s.reason)}</div>
-      <button class="btn btn-primary" style="margin-top:10px" data-action="set-goal">Сделать целью и пересчитать шаги</button>
-    </div>`;
-  }
-  return `
-  <section class="card coach">
-    <div class="coach-avatar">🤖</div>
-    <div>
-      <b>Карьерный помощник: разберём ваш следующий шаг</b>
-      <div class="small muted">Спросите о навыках, причинах рекомендации, альтернативах или новой цели — на русском, қазақша или English.
-      AI получает ваш вопрос, последние сообщения и расчётные факты профиля, без имени. Цель меняется только после подтверждения.</div>
-      <div aria-live="polite">${state.dialogue.map(m => `<div class="explain"><b>${m.role === "user" ? "Вы" : "Помощник"}</b><br>${h(m.text)}${m.details ? `<details><summary>Цифры и расчёт</summary>${h(m.details)}</details>` : ""}</div>`).join("")}</div>
-      <form data-action="coach">
-        <input class="input" name="wish" data-action="wish" value="${h(state.wish)}" maxlength="500" placeholder="Каких навыков мне не хватает? Почему выбран этот курс?" required>
-        <button class="btn btn-primary" type="submit">${state.busy === "coach" ? spinner : "Спросить"}</button>
-      </form>
-      ${result}
-    </div>
+function chatKey(eventId) {
+  return `${state.profileId}:${eventId}:${state.lang}`;
+}
+
+function activityChat(eventId) {
+  const key = chatKey(eventId);
+  return state.chats[key] ||= { open: false, messages: [], draft: "", suggestion: null };
+}
+
+function activityChatView(rec) {
+  const chat = activityChat(rec.event_id);
+  if (!chat.open) return "";
+  const busy = state.busy === `chat:${chatKey(rec.event_id)}`;
+  const messages = chat.messages.map(m => `<div class="explain"><b>${m.role === "user" ? "Вы" : "Помощник"}</b><br>${h(m.text)}${m.details ? `<details><summary>Цифры и расчёт</summary>${h(m.details)}</details>` : ""}</div>`).join("");
+  return `<section class="activity-chat" aria-label="Чат о занятии ${h(rec.title)}">
+    <b>Обсудим «${h(rec.title)}»</b>
+    <p class="small muted">Помощник знает, о каком занятии идёт речь. Спросите, зачем оно вам, что даст или какие есть альтернативы.</p>
+    <div class="chat-messages" role="log" aria-live="polite">${messages || '<p class="small muted">Например: «Почему мне подходит это занятие?»</p>'}</div>
+    <form data-action="chat" data-event="${h(rec.event_id)}" class="chat-form">
+      <label class="small">Ваш вопрос
+        <textarea class="input" name="wish" data-action="chat-draft" data-event="${h(rec.event_id)}" maxlength="500" rows="2" required>${h(chat.draft)}</textarea>
+      </label>
+      <button class="btn btn-primary" type="submit" ${state.busy ? "disabled" : ""}>${busy ? spinner : ""} Отправить</button>
+    </form>
+    ${chat.suggestion ? `<div class="suggestion"><b>${h(chat.suggestion.label)}</b><p class="small">Это предварительная цель. Она изменится только после подтверждения.</p><button class="btn btn-ghost" data-action="set-goal" data-event="${h(rec.event_id)}">Сделать целью и пересчитать шаги</button></div>` : ""}
+    <p class="small muted">${state.session.ai ? "В AI отправляются вопрос и расчётные факты профиля, без имени." : "AI не настроен: доступен локальный разбор без LLM."}</p>
   </section>`;
 }
 
 function recommendationView(rec, top) {
-  const key = `${state.profileId}:${rec.event_id}:${state.lang}`;
-  const explanation = state.explanations[key];
   const factors = rec.factors
     .map(
       (f) => `<li><span class="sign ${f.weight < 0 ? "minus" : "plus"}">${f.weight < 0 ? "−" : "+"}</span>
         <div>${h(f.label)}<small title="${h(f.detail)}">${h(f.detail_ru)}</small></div></li>`,
     )
     .join("");
-  const busyExplain = state.busy === `explain:${rec.event_id}`;
   const busyDone = state.busy === `complete:${rec.event_id}`;
   return `
   <article class="card rec${top ? " top" : ""}">
@@ -329,14 +318,14 @@ function recommendationView(rec, top) {
     <div class="gains">${rec.skill_changes.map((c) => `<span class="gain">${h(c.name)} ${c.before} → <b>${c.after}</b></span>`).join("")}</div>
     <div><div class="small muted" style="margin-bottom:8px">Почему этот шаг — ${rec.factors.length} ${plural(rec.factors.length, "фактор", "фактора", "факторов")}</div>
       <ul class="factors">${factors}</ul></div>
-    ${explanation ? `<div class="explain">${h(explanation)}</div>` : ""}
     <details><summary>Описание занятия</summary><p class="small">${h(rec.description)}</p>
       <p class="small muted">Оценка подбора: ${rec.score} — сумма вкладов факторов, не вероятность успеха.</p></details>
     <div class="row">
-      ${state.session.ai ? `<button class="btn btn-ghost" data-action="explain" data-event="${h(rec.event_id)}" ${explanation ? "disabled" : ""}>${busyExplain ? spinner : "✨"} Объяснить с AI</button>` : ""}
+      ${state.profile.own ? `<button class="btn btn-ghost" data-action="toggle-chat" data-event="${h(rec.event_id)}" aria-expanded="${activityChat(rec.event_id).open}">${activityChat(rec.event_id).open ? "Закрыть чат" : "✨ Спросить у AI"}</button>` : ""}
       <button class="btn btn-primary" data-action="complete" data-event="${h(rec.event_id)}" ${rec.completed_today ? "disabled" : ""}>
         ${busyDone ? spinner : "✓"} ${rec.completed_today ? "Отмечено сегодня" : "Отметить как пройдено"}</button>
     </div>
+    ${state.profile.own ? activityChatView(rec) : ""}
   </article>`;
 }
 
@@ -480,7 +469,7 @@ async function refreshAfterDataChange() {
   state.employees = await api("/api/employees");
   state.hr = null;
   state.profile = null;
-  state.explanations = {};
+  state.chats = {};
 }
 
 const actions = {
@@ -493,7 +482,7 @@ const actions = {
   },
   logout: async () => {
     await api("/api/session", { method: "DELETE" });
-    Object.assign(state, { session: null, employees: [], profile: null, profileId: null, hr: null, explanations: {}, dialogue: [], suggestion: undefined, wish: "" });
+    Object.assign(state, { session: null, employees: [], profile: null, profileId: null, hr: null, chats: {} });
     location.hash = "";
     render();
   },
@@ -501,14 +490,10 @@ const actions = {
     withBusy("hr", async () => {
       state.hr = null;
     }),
-  explain: (el) => {
-    const employeeId = state.profileId, eventId = el.dataset.event, language = state.lang;
-    return withBusy(`explain:${eventId}`, async () => {
-      const result = await api(`/api/employees/${encodeURIComponent(employeeId)}/explain`, {
-        json: { event_id: eventId, language },
-      });
-      if (state.profileId === employeeId) state.explanations[`${employeeId}:${eventId}:${language}`] = result.text;
-    });
+  "toggle-chat": (el) => {
+    const chat = activityChat(el.dataset.event);
+    chat.open = !chat.open;
+    render();
   },
   complete: (el) =>
     withBusy(`complete:${el.dataset.event}`, async () => {
@@ -516,7 +501,7 @@ const actions = {
         json: { event_id: el.dataset.event },
       });
       await loadProfile(state.profileId);
-      state.dialogue = []; // the server starts a fresh dialogue after progress changes
+      state.chats = {}; // New progress invalidates activity context
       state.hr = null;
       const changes = result.changes.map((c) => `${c.name}: ${c.before} → ${c.after}`).join("; ");
       let message = `Прогресс обновлён. ${changes || "Уровни навыков не изменились."}`;
@@ -526,15 +511,14 @@ const actions = {
       }
       toast(message);
     }),
-  "set-goal": () =>
+  "set-goal": (el) =>
     withBusy("goal", async () => {
-      const s = state.suggestion;
+      const s = activityChat(el.dataset.event).suggestion;
       await api(`/api/employees/${encodeURIComponent(state.profileId)}/goal`, {
         json: { target_role: s.target_role, target_grade: s.target_grade },
       });
       await loadProfile(state.profileId);
-      state.suggestion = undefined;
-      state.dialogue = []; // the server starts a fresh dialogue after the goal changes
+      state.chats = {}; // A new goal invalidates activity context
       state.hr = null;
       toast(`Цель обновлена: ${s.label}. Шаги пересчитаны.`);
     }),
@@ -549,18 +533,20 @@ const forms = {
       await loadSession();
       location.hash = defaultRoute();
     }),
-  coach: (form) => {
+  chat: (form) => {
     const wish = form.wish.value.trim();
-    const employeeId = state.profileId;
-    const language = state.lang;
+    const employeeId = state.profileId, language = state.lang, eventId = form.dataset.event;
+    const key = chatKey(eventId), chat = activityChat(eventId);
     if (!wish) return;
-    return withBusy("coach", async () => {
-      const result = await api(`/api/employees/${encodeURIComponent(employeeId)}/assistant`, { json: { wish, language } });
-      if (state.profileId !== employeeId) return;
-      state.dialogue.push({ role: "user", text: wish }, { role: "assistant", text: result.text, details: result.details });
-      state.dialogue = state.dialogue.slice(-6);
-      state.wish = "";
-      state.suggestion = result.suggestion || undefined;
+    return withBusy(`chat:${key}`, async () => {
+      const result = await api(`/api/employees/${encodeURIComponent(employeeId)}/assistant`, {
+        json: { wish, language, event_id: eventId },
+      });
+      if (state.profileId !== employeeId || state.chats[key] !== chat) return;
+      chat.messages.push({ role: "user", text: wish }, { role: "assistant", text: result.text, details: result.details });
+      chat.messages = chat.messages.slice(-6);
+      chat.draft = "";
+      chat.suggestion = result.suggestion || null;
     });
   },
   additions: (form) => {
@@ -605,7 +591,7 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("input", (event) => {
-  if (event.target.dataset.action === "wish") state.wish = event.target.value;
+  if (event.target.dataset.action === "chat-draft") activityChat(event.target.dataset.event).draft = event.target.value;
   if (event.target.dataset.action === "filter") {
     state.filter = event.target.value;
     const position = event.target.selectionStart;
