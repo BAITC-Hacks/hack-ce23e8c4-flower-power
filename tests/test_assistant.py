@@ -106,3 +106,45 @@ def test_quota_error_is_visible_without_provider_body(ds: Dataset, monkeypatch: 
     assert reply.status == "quota"
     assert "лимит" in reply.text
     assert reply.intent == "gaps"
+
+
+@pytest.mark.parametrize("failure", ["limit", "quota", "connection"])
+def test_goal_wish_gets_offline_goal_when_ai_is_unavailable(
+    ds: Dataset, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(assistant, "post", MagicMock(side_effect=AIUnavailableError(failure)))
+
+    reply = assistant.answer(ds, "E0001", "хочу стать тимлидом в аналитике", allow_ai=failure != "limit")
+
+    assert reply.source == "local"
+    assert reply.intent == "goal"
+    assert reply.suggestion is not None
+    assert (reply.suggestion.target_role, reply.suggestion.target_grade) == ("Data Analyst", "Lead")
+    assert reply.suggestion.source == "keywords"
+
+
+def test_ai_clarify_is_not_overridden_by_keywords(ds: Dataset, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    decision = {"intent": "clarify", "skill_ids": [], "event_ids": [], "goal_key": ""}
+    monkeypatch.setattr(assistant, "post", MagicMock(return_value=envelope(decision)))
+
+    reply = assistant.answer(ds, "E0001", "хочу стать тимлидом в аналитике")
+
+    assert (reply.source, reply.intent, reply.suggestion) == ("ai", "clarify", None)
+
+
+@pytest.mark.parametrize(
+    ("language", "status_word", "goal_word"),
+    [
+        ("kk", "Серверде", "Ұсынылатын мақсат"),
+        ("en", "configured", "Suggested goal"),
+        ("ru", "настроен", "Предлагаемая"),
+    ],
+)
+def test_local_goal_reply_is_in_one_language(ds: Dataset, language: str, status_word: str, goal_word: str) -> None:
+    reply = assistant.answer(ds, "E0001", "хочу стать тимлидом в аналитике", language)  # type: ignore[arg-type]
+
+    assert status_word in reply.text
+    assert goal_word in reply.text
+    assert "Found by keywords" not in reply.text
