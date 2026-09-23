@@ -268,3 +268,19 @@ def test_activity_chat_rejects_unrecommended_event(client: TestClient) -> None:
     login(client, role="employee")
     response = client.post("/api/employees/E0001/assistant", json={"wish": "Почему?", "event_id": "EV_UNKNOWN"})
     assert response.status_code == 404
+
+
+def test_social_language_switch_preserves_thread_without_using_budget(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login(client, "employee")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    for message, language in [("hi", "en"), ("сәлем", "kk"), ("привет", "ru")]:
+        response = client.post("/api/employees/E0001/assistant", json={"wish": message})
+        assert response.status_code == 200
+        assert response.json()["language"] == language
+        assert response.json()["status"] == "social"
+    session = next(iter(api._SESSIONS.values()))
+    assert session.ai_calls == 0
+    assert len(session.dialogue) == 1
+    assert len(next(iter(session.dialogue.values()))) == 6

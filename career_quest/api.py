@@ -80,7 +80,7 @@ class WishBody(BaseModel):
 
     wish: str = Field(min_length=1, max_length=500)
     event_id: str | None = None
-    language: Language = "ru"
+    language: Literal["auto", "ru", "kk", "en"] = "auto"
 
 
 class GoalBody(BaseModel):
@@ -408,14 +408,17 @@ def assistant_reply(
             session.dataset,
             employee_id,
             body.wish,
-            body.language,
+            body.language if body.language != "auto" else "ru",
             [{"role": row["role"], "text": row["text"]} for row in history[-6:]],
             allow_ai=session.ai_calls < 40,
             pending_goal=session.pending_goals.get(thread),
             event_id=body.event_id,
+            auto_language=body.language == "auto",
         )
         session.ai_calls += int(
-            llm_configured() and session.ai_calls < 40 and not (reply.status == "preview" and reply.source == "local")
+            llm_configured()
+            and session.ai_calls < 40
+            and not (reply.status in {"preview", "social"} and reply.source == "local")
         )
         result = reply.model_dump()
         if reply.suggestion:
