@@ -179,6 +179,38 @@ def _generated_explanation(rec: Recommendation, language: Language) -> _Explanat
     return explanation
 
 
+def _failure_note(exc: Exception, language: Language) -> str:
+    code = "validation"
+    if isinstance(exc, urllib.error.HTTPError):
+        code = {401: "credentials", 403: "credentials", 429: "quota"}.get(exc.code, "provider")
+    elif isinstance(exc, OSError):
+        code = "connection"
+    notes = {
+        "ru": {
+            "credentials": "AI не принял ключ или доступ к модели.",
+            "quota": "Лимит запросов или бюджета AI исчерпан.",
+            "provider": "Ошибка сервиса AI.",
+            "connection": "AI недоступен или не ответил вовремя.",
+            "validation": "Ответ AI не прошёл проверку фактов или оказался неполным.",
+        },
+        "kk": {
+            "credentials": "AI кілті немесе модельге қолжетімділік қабылданбады.",
+            "quota": "AI сұрау немесе бюджет шегі таусылды.",
+            "provider": "AI қызметінде қате.",
+            "connection": "AI қолжетімсіз немесе уақытында жауап бермеді.",
+            "validation": "AI жауабы толық емес немесе деректерді тексеруден өтпеді.",
+        },
+        "en": {
+            "credentials": "AI credentials or model access were rejected.",
+            "quota": "AI rate or budget limit reached.",
+            "provider": "AI provider error.",
+            "connection": "AI timed out or could not be reached.",
+            "validation": "The AI response was incomplete or failed fact validation.",
+        },
+    }
+    return notes[language][code]
+
+
 def explain(rec: Recommendation, employee: Employee, language: Language) -> str:
     """Generate evidence-linked text, falling back to original facts on any failure.
 
@@ -198,6 +230,6 @@ def explain(rec: Recommendation, employee: Employee, language: Language) -> str:
         result = _generated_explanation(rec, language)
     except (OSError, ValueError, HTTPException, urllib.error.URLError) as exc:
         log.warning("llm_explanation_fallback", event_id=rec.event_id, error_type=type(exc).__name__)
-        return fallback
+        return _failure_note(exc, language) + "\n\n" + fallback
     statements = "\n\n".join(f"[{statement.factor_index + 1}] {statement.text}" for statement in result.statements)
     return f"{HEADINGS[language][1]}\n\n{statements}"

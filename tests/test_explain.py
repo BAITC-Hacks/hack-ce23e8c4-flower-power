@@ -113,7 +113,7 @@ def test_changed_facts_trigger_fallback(
     statements = valid_statements()
     statements[0]["text"] = bad_text
     mock_response(monkeypatch, envelope(statements))
-    assert explanation.explain(rec, employee, "ru") == explanation.deterministic_explanation(rec, employee, "ru")
+    assert explanation.explain(rec, employee, "ru").endswith(explanation.deterministic_explanation(rec, employee, "ru"))
 
 
 @pytest.mark.parametrize("index", [0, 99])

@@ -47,6 +47,28 @@ STATUS = {
 }
 
 
+TITLES = {
+    "ru": (
+        "Навыки для вашей цели",
+        "Разбор по данным профиля",
+        "Уточните: разобрать навыки, объяснить занятие или выбрать карьерную цель?",
+        "Я помогаю только с карьерной целью, навыками и занятиями из каталога. Что из этого разобрать?",
+    ),
+    "kk": (
+        "Мақсатыңызға қажетті дағдылар",
+        "Профиль деректері бойынша талдау",
+        "Нақтылаңыз: дағдыларды талдау, ұсынысты түсіндіру немесе мансаптық мақсатты таңдау?",
+        "Мен тек мансаптық мақсат, дағдылар және каталогтағы сабақтар бойынша көмектесемін.",
+    ),
+    "en": (
+        "Skills for your goal",
+        "Analysis from profile data",
+        "Would you like skill gaps, a recommendation explanation, or a career goal?",
+        "I can help with career goals, skills and activities in this catalog only.",
+    ),
+}
+
+
 class Decision(BaseModel):
     """Strict selection of an action and existing evidence, never arbitrary prose."""
 
@@ -162,28 +184,15 @@ def _local(
 
 
 def _render(decision: Decision, evidence: dict[str, Any], language: Language) -> str:
-    titles = {
-        "ru": (
-            "Навыки для вашей цели",
-            "Разбор по данным профиля",
-            "Уточните: разобрать навыки, объяснить занятие или выбрать карьерную цель?",
-            "Я помогаю только с карьерной целью, навыками и занятиями из каталога. Что из этого разобрать?",
-        ),
-        "kk": (
-            "Мақсатыңызға қажетті дағдылар",
-            "Профиль деректері бойынша талдау",
-            "Нақтылаңыз: дағдыларды талдау, ұсынысты түсіндіру немесе мансаптық мақсатты таңдау?",
-            "Мен тек мансаптық мақсат, дағдылар және каталогтағы сабақтар бойынша көмектесемін.",
-        ),
-        "en": (
-            "Skills for your goal",
-            "Analysis from profile data",
-            "Would you like skill gaps, a recommendation explanation, or a career goal?",
-            "I can help with career goals, skills and activities in this catalog only.",
-        ),
-    }[language]
+    titles = TITLES[language]
     if decision.intent in {"clarify", "out_of_scope"}:
         return titles[2 if decision.intent == "clarify" else 3]
+    if decision.intent == "gaps" and evidence["target"] is None:
+        return {
+            "ru": "Карьерная цель не определена. Уточните желаемую роль и уровень.",
+            "kk": "Мансаптық мақсат анықталмаған. Қалаған рөл мен деңгейді нақтылаңыз.",
+            "en": "No career target is defined. Please specify a role and grade.",
+        }[language]
     if decision.intent == "gaps":
         rows = [g for g in evidence["gaps"] if g["skill_id"] in decision.skill_ids]
         lines = [
