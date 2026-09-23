@@ -91,10 +91,9 @@ HackAlem AI · трек Halyk Bank · кейс **Career Quest**.
 | Сервер | FastAPI, Uvicorn, python-multipart (загрузка файлов) |
 | Модели данных | Pydantic 2 |
 | Веб-клиент | собственный интерфейс без фреймворков и сборки: `web/index.html`, `web/styles.css`, `web/app.js` |
-| Запасной интерфейс | Streamlit, pandas (`app.py`) |
 | AI | OpenAI Responses API со строгой JSON-схемой, модель по умолчанию `gpt-4.1-mini` (меняется через `OPENAI_MODEL`), `store: false` |
 | Логирование | structlog |
-| Качество | pytest (104 теста), Node.js `node:test` (3 теста клиента), ruff, mypy (strict), httpx |
+| Качество | pytest (106 тестов), Node.js `node:test` (3 теста клиента), ruff, mypy (strict), httpx |
 | Запуск | uv, Docker, Docker Compose; workflow GitHub Actions `.github/workflows/ci.yml` |
 
 ## 5. Архитектура
@@ -121,7 +120,6 @@ career_quest/api.py — FastAPI: сессии, роли, JSON API, раздач�
   видны другим сессиям и переживают перезагрузку страницы.
 - Доступ проверяется на сервере: сотрудник открывает только свой профиль, HR-отчёты и загрузка данных доступны
   только HR, помощник и смена цели — только самому сотруднику.
-- `app.py` — запасной интерфейс на Streamlit поверх тех же модулей.
 
 ## 6. Установка и запуск
 
@@ -155,8 +153,7 @@ uv run --env-file .env uvicorn career_quest.api:app --host 127.0.0.1 --port 8501
 | `CQ_DATA_DIR` | Другой каталог с данными (по умолчанию `data/`) |
 | `CQ_PORT` | Порт для Docker (по умолчанию 8501) |
 
-Документация API (Swagger): http://localhost:8501/api/docs. Запасной интерфейс:
-`uv run --env-file .env streamlit run app.py`.
+Документация API (Swagger): http://localhost:8501/api/docs.
 
 ## 7. Как проверить решение
 

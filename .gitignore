@@ -11,6 +11,5 @@ dist/
 .env
 .env.*
 !.env.example
-.streamlit/secrets.toml
 data/local/
 .DS_Store
