@@ -231,3 +231,15 @@ def test_goal_change_clears_old_dialogue_and_keeps_budget(client: TestClient) ->
     assert not session.dialogue
     assert not session.ai_cache
     assert session.ai_calls == 3
+
+
+def test_team_lead_dialogue_keeps_unconfirmed_goal_separate(client: TestClient) -> None:
+    login(client, role="employee")
+    original = client.get("/api/employees/E0001").json()["employee"]["goal"]
+    first = client.post("/api/employees/E0001/assistant", json={"wish": "хочу стать тимлидом"}).json()
+    followup = client.post("/api/employees/E0001/assistant", json={"wish": "что мне сделать?"}).json()
+    assert first["suggestion"]["target_grade"] == "Lead"
+    assert followup["suggestion"] == first["suggestion"]
+    assert followup["details"] == first["details"]
+    assert "EV_" not in followup["text"]
+    assert client.get("/api/employees/E0001").json()["employee"]["goal"] == original

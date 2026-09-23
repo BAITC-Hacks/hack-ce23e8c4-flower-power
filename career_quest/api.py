@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from career_quest.access import Viewer, authenticate, can_view_employee, configured_access, require_hr
 from career_quest.assistant import answer
-from career_quest.coach import set_goal
+from career_quest.coach import GoalSuggestion, set_goal
 from career_quest.data import Dataset, DatasetError, load_dataset
 from career_quest.explain import explain, llm_configured
 from career_quest.factor_text import russian_detail
@@ -57,6 +57,7 @@ class _Session:
     dataset: Dataset
     ai_cache: dict[str, Any] = field(default_factory=dict)
     dialogue: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    pending_goals: dict[str, GoalSuggestion] = field(default_factory=dict)
     ai_calls: int = 0
     ai_lock: Any = field(default_factory=Lock)
 
@@ -337,6 +338,7 @@ def complete(employee_id: str, body: EventBody, response: Response, cq_session: 
     session.dataset = updated
     session.ai_cache.clear()
     session.dialogue.clear()
+    session.pending_goals.clear()
     after, new_quest = effective_skills(updated, employee_id), build_quest(updated, employee_id)
     earned = [c for c in (new_quest.badges if new_quest else []) if not old_quest or c not in old_quest.badges]
     return {
@@ -397,10 +399,14 @@ def assistant_reply(
             body.language,
             [{"role": row["role"], "text": row["text"]} for row in history[-6:]],
             allow_ai=session.ai_calls < 40,
+            pending_goal=session.pending_goals.get(employee_id),
         )
-        session.ai_calls += int(llm_configured() and session.ai_calls < 40)
+        session.ai_calls += int(
+            llm_configured() and session.ai_calls < 40 and not (reply.status == "preview" and reply.source == "local")
+        )
         result = reply.model_dump()
         if reply.suggestion:
+            session.pending_goals[employee_id] = reply.suggestion
             result["suggestion"]["label"] = _role_label(reply.suggestion.target_role, reply.suggestion.target_grade)
         history.extend(
             [{"role": "user", "text": body.wish}, {"role": "assistant", "text": reply.text[:1800], "request_key": key}]
@@ -422,6 +428,7 @@ def goal(employee_id: str, body: GoalBody, response: Response, cq_session: Sessi
         raise HTTPException(status_code=400, detail="Такой роли нет в справочнике") from exc
     session.ai_cache.clear()
     session.dialogue.clear()
+    session.pending_goals.clear()
     return {"goal": _role_label(body.target_role, body.target_grade)}
 
 
@@ -498,6 +505,7 @@ async def add_data(
     session.dataset = import_additions(viewer, session.dataset, raw_employees, raw_history)
     session.ai_cache.clear()
     session.dialogue.clear()
+    session.pending_goals.clear()
     return {"employees": len(session.dataset.employees), "records": len(session.dataset.history)}
 
 
@@ -512,6 +520,7 @@ async def replace_data(
     session.dataset = import_snapshot(viewer, {name: uploads[name] for name in FILENAMES if name in uploads})
     session.ai_cache.clear()
     session.dialogue.clear()
+    session.pending_goals.clear()
     return {"employees": len(session.dataset.employees), "records": len(session.dataset.history)}
 
 

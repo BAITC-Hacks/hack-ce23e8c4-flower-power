@@ -53,7 +53,7 @@ def test_followup_and_mixed_language_are_sent_with_scoped_evidence(
     assert ds.employee("E0001").full_name not in payload["input"]
     assert "employee_id" not in data["evidence"]
     assert reply.source == "ai"
-    assert event in reply.text
+    assert event in reply.details
     assert payload["store"] is False
     assert payload["max_output_tokens"] == 300
 
@@ -148,3 +148,40 @@ def test_local_goal_reply_is_in_one_language(ds: Dataset, language: str, status_
     assert status_word in reply.text
     assert goal_word in reply.text
     assert "Found by keywords" not in reply.text
+
+
+def test_team_lead_request_previews_current_direction_without_paid_call(
+    ds: Dataset, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    network = MagicMock(side_effect=AssertionError("Explicit goal needs no paid classification"))
+    monkeypatch.setattr(assistant, "post", network)
+    original = ds.employee("E0001").career_goal
+    reply = assistant.answer(ds, "E0001", "хочу стать тимлидом")
+    assert reply.suggestion is not None
+    assert reply.suggestion.target_role == ds.employee("E0001").role
+    assert reply.suggestion.target_grade == "Lead"
+    assert "Предварительный план" in reply.text
+    assert "Цель в профиле пока не изменена" in reply.text
+    assert "EV_" not in reply.text
+    assert "SK_" not in reply.text
+    assert ds.employee("E0001").career_goal == original
+    network.assert_not_called()
+
+
+def test_followup_uses_pending_goal_not_old_target(ds: Dataset) -> None:
+    first = assistant.answer(ds, "E0001", "хочу стать тимлидом")
+    followup = assistant.answer(ds, "E0001", "что мне сделать?", pending_goal=first.suggestion)
+    assert followup.suggestion == first.suggestion
+    assert followup.text == first.text
+    assert followup.details == first.details
+    assert followup.details
+
+
+def test_negated_or_different_direction_does_not_match_guided_shortcut(ds: Dataset) -> None:
+    first = assistant.answer(ds, "E0001", "хочу стать тимлидом")
+    rejected = assistant.answer(ds, "E0001", "не хочу стать тимлидом", pending_goal=first.suggestion)
+    assert rejected.suggestion is None
+    changed = assistant.answer(ds, "E0001", "хочу стать тимлидом в аналитике", pending_goal=first.suggestion)
+    assert changed.suggestion is not None
+    assert changed.suggestion.target_role == "Data Analyst"
