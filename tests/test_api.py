@@ -64,7 +64,7 @@ def test_complete_updates_progress_and_blocks_repeat_click(client: TestClient) -
 
 
 def test_coach_offline_and_goal_change(client: TestClient) -> None:
-    login(client)
+    login(client, role="employee")
 
     suggestion = client.post("/api/employees/E0001/coach", json={"wish": "хочу стать тимлидом в аналитике"}).json()
     chosen = suggestion["suggestion"]
@@ -119,3 +119,28 @@ def test_configured_access_limits_employee_to_own_profile(client: TestClient, mo
     assert [e["id"] for e in client.get("/api/employees").json()] == ["E0005"]
     assert client.get("/api/employees/E0001").status_code == 403
     assert client.get("/api/employees/E0005").status_code == 200
+
+
+def test_hr_sees_neutral_wording_and_cannot_set_goals(client: TestClient) -> None:
+    login(client)
+
+    profile = client.get("/api/employees/E0001").json()
+    labels = " ".join(f["label"] for rec in profile["recommendations"] for f in rec["factors"])
+    coach = client.post("/api/employees/E0001/coach", json={"wish": "хочу в аналитику"})
+    goal = client.post("/api/employees/E0001/goal", json={"target_role": "Data Analyst", "target_grade": "Senior"})
+
+    assert profile["own"] is False
+    assert "ваш" not in labels.lower()
+    assert " вы " not in f" {labels.lower()} "
+    assert coach.status_code == 403
+    assert goal.status_code == 403
+
+
+def test_factor_details_are_translated(client: TestClient) -> None:
+    login(client, role="employee")
+
+    factors = [f for rec in client.get("/api/employees/E0001").json()["recommendations"] for f in rec["factors"]]
+
+    assert factors
+    for factor in factors:
+        assert not any(word in factor["detail_ru"] for word in ("required", "Designed", "earlier", "Takes", "session"))

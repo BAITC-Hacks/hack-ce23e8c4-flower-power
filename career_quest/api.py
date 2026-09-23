@@ -22,10 +22,12 @@ from career_quest.access import Viewer, authenticate, can_view_employee, configu
 from career_quest.coach import set_goal, suggest_goal
 from career_quest.data import Dataset, DatasetError, load_dataset
 from career_quest.explain import explain, llm_configured
+from career_quest.factor_text import russian_detail
 from career_quest.labels import (
     BADGE_LABELS,
     EVENT_LABELS,
     FACTOR_LABELS,
+    FACTOR_LABELS_NEUTRAL,
     FORMAT_LABELS,
     GRADE_LABELS,
     LEVEL_LABELS,
@@ -127,6 +129,11 @@ def _employee_for(session: _Session, employee_id: str) -> Employee:
         raise HTTPException(status_code=404, detail="Сотрудник не найден") from exc
 
 
+def _require_own_goal(session: _Session) -> None:
+    if _viewer(session).role != "employee":
+        raise PermissionError("Карьерную цель выбирает сам сотрудник")
+
+
 def _role_label(role: str, grade: str) -> str:
     return f"{ROLE_LABELS.get(role, role)} · {GRADE_LABELS.get(grade, grade)}"
 
@@ -194,10 +201,14 @@ def profile(employee_id: str, response: Response, cq_session: SessionCookie = No
     employee = _employee_for(session, employee_id)
     ds = session.dataset
     quest = build_quest(ds, employee_id)
+    own = _viewer(session).role == "employee"
     return {
+        "own": own,
         "employee": _employee_payload(employee),
         "quest": _quest_payload(ds, quest),
-        "recommendations": [_recommendation_payload(ds, employee, rec, quest) for rec in recommend(ds, employee_id)],
+        "recommendations": [
+            _recommendation_payload(ds, employee, rec, quest, own=own) for rec in recommend(ds, employee_id)
+        ],
         "skills": _skills_payload(ds, employee),
         "history": [
             {
@@ -253,7 +264,7 @@ def _event_title(ds: Dataset, event_id: str) -> str:
 
 
 def _recommendation_payload(
-    ds: Dataset, employee: Employee, rec: Recommendation, quest: Quest | None
+    ds: Dataset, employee: Employee, rec: Recommendation, quest: Quest | None, *, own: bool
 ) -> dict[str, Any]:
     event = ds.event(rec.event_id)
     done_today = any(
@@ -275,7 +286,13 @@ def _recommendation_payload(
             for key, (before, after) in rec.skill_changes.items()
         ],
         "factors": [
-            {"code": f.code, "weight": f.weight, "detail": f.detail, "label": FACTOR_LABELS.get(f.code, f.code)}
+            {
+                "code": f.code,
+                "weight": f.weight,
+                "detail": f.detail,
+                "detail_ru": russian_detail(f, lambda skill_id: _skill_name(ds, skill_id)),
+                "label": (FACTOR_LABELS if own else FACTOR_LABELS_NEUTRAL).get(f.code, f.code),
+            }
             for f in rec.factors
         ],
         "completed_today": done_today,
@@ -341,6 +358,7 @@ def coach(employee_id: str, body: WishBody, response: Response, cq_session: Sess
     """Turn a free-text wish into a catalog career goal."""
     session = _session(response, cq_session)
     _employee_for(session, employee_id)
+    _require_own_goal(session)
     suggestion = suggest_goal(session.dataset, employee_id, body.wish, "ru")
     if suggestion is None:
         return {"suggestion": None}
@@ -357,6 +375,7 @@ def goal(employee_id: str, body: GoalBody, response: Response, cq_session: Sessi
     """Set the employee's career goal; recommendations are recomputed on the next read."""
     session = _session(response, cq_session)
     _employee_for(session, employee_id)
+    _require_own_goal(session)
     try:
         session.dataset = set_goal(session.dataset, employee_id, CareerGoal(**body.model_dump()))
     except KeyError as exc:
