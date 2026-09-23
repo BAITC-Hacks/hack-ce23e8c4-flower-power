@@ -22,6 +22,7 @@ from career_quest.access import Viewer, authenticate, can_view_employee, configu
 from career_quest.data import Dataset, DatasetError, load_dataset
 from career_quest.explain import deterministic_explanation, explain, llm_configured
 from career_quest.models import Employee, Language
+from career_quest.quest import BADGES, Quest, build_quest
 from career_quest.scoring import Recommendation, complete_activity, effective_skills, recommend, target_profile
 from career_quest.snapshot import FILENAMES, export_snapshot, import_additions, import_snapshot
 
@@ -178,6 +179,63 @@ FACTOR_LABELS = {
     "availability": "Учтено, когда можно начать занятие.",
     "duration": "Учтено время на занятие: длительные активности получают меньший приоритет.",
 }
+BADGE_LABELS = {
+    "first_step": ("🌱", "Первый шаг", "Завершена первая добровольная активность"),
+    "self_starter": ("🚀", "По своей инициативе", "Активность выбрана самостоятельно"),
+    "comeback": ("🔁", "Возвращение", "Вернулись к навыку, который раньше не получилось развить"),
+    "grown_since_review": ("📈", "Рост после оценки", "Навыки выросли после последней оценки"),
+    "critical_closed": ("🎯", "Ключевой навык", "Обязательный навык цели на нужном уровне"),
+    "halfway": ("⛰️", "Полпути", "Покрыта половина требований цели"),
+    "ready": ("🏆", "Готов к цели", "Все обязательные навыки цели на нужном уровне"),
+}
+MAX_QUEST_STEPS = 6
+STYLE = """
+<style>
+#MainMenu, footer, [data-testid="stDecoration"] {visibility: hidden;}
+.block-container {padding-top: 2.2rem; max-width: 1180px;}
+h1, h2, h3 {letter-spacing: -0.01em; color: #10261E;}
+[data-testid="stSidebar"] {background: #EEF5F1; border-right: 1px solid #DCE8E1;}
+[data-testid="stMetric"] {background: #FFFFFF; border: 1px solid #E3EAE6; border-radius: 16px;
+  padding: 14px 18px; box-shadow: 0 1px 2px rgba(16, 40, 30, .05);}
+.cq-brand {display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px;}
+.cq-brand b {font-size: 26px; color: #0B5D45;}
+.cq-brand span {color: #5B6B64; font-size: 15px;}
+.cq-hero {background: linear-gradient(135deg, #0E7C5A 0%, #0A4F3B 100%); color: #FFFFFF; border-radius: 22px;
+  padding: 26px 30px; display: flex; gap: 30px; align-items: center; margin: 6px 0 22px;
+  box-shadow: 0 10px 30px rgba(10, 79, 59, .18);}
+.cq-ring {flex: none; width: 128px; height: 128px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(#F5B83D calc(var(--p) * 1%), rgba(255, 255, 255, .16) 0);}
+.cq-ring div {width: 100px; height: 100px; border-radius: 50%; background: #0B5A44; display: grid;
+  place-items: center; text-align: center; font-size: 26px; font-weight: 700; line-height: 1.1;}
+.cq-ring small {display: block; font-size: 11px; font-weight: 400; opacity: .8;}
+.cq-path {font-size: 13px; text-transform: uppercase; letter-spacing: .06em; opacity: .75;}
+.cq-goal {font-size: 22px; font-weight: 700; margin: 4px 0 2px;}
+.cq-note {font-size: 13px; opacity: .75;}
+.cq-stats {display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap;}
+.cq-stat {background: rgba(255, 255, 255, .12); border-radius: 12px; padding: 8px 14px; font-size: 13px;}
+.cq-stat b {display: block; font-size: 20px;}
+.cq-steps {display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; margin-bottom: 8px;}
+.cq-step {background: #FFFFFF; border: 1px solid #E3EAE6; border-radius: 14px; padding: 12px 14px;}
+.cq-step.critical {border-left: 4px solid #F5B83D;}
+.cq-step.done {background: #E8F5EE; border-color: #BFE3D0;}
+.cq-step b {font-size: 14px; color: #10261E;}
+.cq-step small {color: #5B6B64; display: block; margin-top: 2px;}
+.cq-bar {height: 6px; background: #E3EAE6; border-radius: 3px; margin-top: 8px; overflow: hidden;}
+.cq-bar i {display: block; height: 100%; background: #0E7C5A; border-radius: 3px;}
+.cq-badges {display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;}
+.cq-badge {display: flex; gap: 8px; align-items: center; background: #FFFFFF; border: 1px solid #E3EAE6;
+  border-radius: 999px; padding: 5px 14px 5px 8px; font-size: 14px;}
+.cq-badge.locked {opacity: .45; filter: grayscale(1);}
+.cq-badge span {font-size: 20px;}
+.cq-rec-top {display: inline-block; background: #F5B83D; color: #3D2A00; font-size: 12px; font-weight: 600;
+  border-radius: 999px; padding: 2px 10px; margin-bottom: 6px;}
+.cq-rec-title {font-size: 21px; font-weight: 700; color: #10261E; margin-bottom: 6px;}
+.cq-chip {display: inline-block; background: #EEF5F1; color: #0B5D45; border-radius: 999px; padding: 3px 10px;
+  font-size: 13px; margin: 0 6px 6px 0;}
+.cq-gain {display: inline-block; background: #FFF6E0; border: 1px solid #F3DDA3; border-radius: 10px;
+  padding: 4px 10px; margin: 2px 6px 6px 0; font-size: 14px;}
+</style>
+"""
 
 
 def _hint(label: str, original: str) -> str:
@@ -316,36 +374,57 @@ def _skill_table(dataset: Dataset, employee: Employee) -> pd.DataFrame:
     )
 
 
-def _trajectory(dataset: Dataset, employee: Employee) -> None:
-    target = target_profile(dataset, employee.employee_id)
-    levels = effective_skills(dataset, employee.employee_id)
-    st.subheader("Траектория развития")
-    if target is None:
+def _hero(employee: Employee, quest: Quest | None) -> None:
+    if quest is None:
         st.info("Карьерная цель не определена. Доступны текущие навыки и история участия.")
+        return
+    percent = round(quest.coverage * 100)
+    critical_left = sum(not m.done for m in quest.milestones if m.critical)
+    source = "ваша карьерная цель" if employee.career_goal else "следующий уровень"
+    st.markdown(
+        f"""<div class="cq-hero">
+<div class="cq-ring" style="--p: {percent}"><div>{percent}%<small>к цели</small></div></div>
+<div>
+<div class="cq-path">{escape(_role_label(employee.role, employee.grade))} → {source}</div>
+<div class="cq-goal">{escape(_role_label(quest.target_role, quest.target_grade))}</div>
+<div class="cq-note">Покрытие требуемых уровней навыков — не вероятность и не гарантия повышения.</div>
+<div class="cq-stats">
+<div class="cq-stat"><b>{critical_left}</b>обязательных навыков осталось</div>
+<div class="cq-stat"><b>+{quest.growth_points}</b>уровней роста после оценки</div>
+<div class="cq-stat"><b>{len(quest.badges)} из {len(BADGES)}</b>личных достижений</div>
+</div></div></div>""",
+        unsafe_allow_html=True,
+    )
+
+
+def _quest(dataset: Dataset, quest: Quest | None) -> None:
+    if quest is None:
+        return
+    st.subheader("Ваш квест")
+    open_steps = [m for m in quest.milestones if not m.done][:MAX_QUEST_STEPS]
+    if open_steps:
+        cards = "".join(
+            f'<div class="cq-step{" critical" if m.critical else ""}"><b>{escape(_skill_name(dataset, m.skill_id))}</b>'
+            f"<small>{'Обязателен для цели · ' if m.critical else ''}уровень {m.current} из {m.required}</small>"
+            f'<div class="cq-bar"><i style="width: {100 * m.current // m.required}%"></i></div></div>'
+            for m in open_steps
+        )
+        st.markdown(f'<div class="cq-steps">{cards}</div>', unsafe_allow_html=True)
+        left = sum(not m.done for m in quest.milestones) - len(open_steps)
+        if left > 0:
+            st.caption(f"И ещё {left} навыков — полный список в саду навыков ниже.")
     else:
-        st.markdown(
-            _hint(_role_label(employee.role, employee.grade), f"{employee.role} / {employee.grade}")
-            + " → "
-            + _hint(_role_label(target.role, target.grade), f"{target.role} / {target.grade}"),
-            unsafe_allow_html=True,
-        )
-        required = sum(target.required_skills.values())
-        reached = sum(min(levels.get(key, 0), value) for key, value in target.required_skills.items())
-        coverage = reached / required if required else 1.0
-        remaining = sum(levels.get(key, 0) < target.required_skills[key] for key in target.critical_skills)
-        first, second = st.columns(2)
-        first.metric(
-            "Прогресс к цели по навыкам",
-            f"{coverage:.0%}",
-            help="Сумма достигнутых уровней, ограниченных требованиями, делится на сумму требуемых уровней.",
-        )
-        second.metric(
-            "Обязательных навыков нужно подтянуть",
-            remaining,
-            help="Количество навыков из critical_skills, по которым текущий уровень ниже целевого.",
-        )
-        st.progress(coverage)
-        st.caption("Покрытие уровней навыков из датасета. Это не вероятность и не гарантия повышения.")
+        st.success("Все требования цели выполнены.")
+    badges = "".join(
+        f'<div class="cq-badge{"" if code in quest.badges else " locked"}" title="{escape(description)}">'
+        f"<span>{icon}</span>{escape(title)}</div>"
+        for code, (icon, title, description) in BADGE_LABELS.items()
+    )
+    st.markdown(f'<div class="cq-badges">{badges}</div>', unsafe_allow_html=True)
+    st.caption("Достижения личные: они не сравниваются с коллегами и не влияют на оценку.")
+
+
+def _trajectory(dataset: Dataset, employee: Employee) -> None:
     _garden(dataset, employee)
 
 
@@ -413,23 +492,25 @@ def _completion_button(dataset: Dataset, employee: Employee, rec: Recommendation
 
 
 def _recommendation_card(
-    dataset: Dataset, employee: Employee, rec: Recommendation, viewer: Viewer, language: Language
+    dataset: Dataset, employee: Employee, rec: Recommendation, viewer: Viewer, language: Language, *, top: bool = False
 ) -> None:
     event = dataset.event(rec.event_id)
     with st.container(border=True):
+        session = rec.next_session.strftime("%d.%m.%Y") if rec.next_session else "в любое время"
+        chips = [FORMAT_LABELS[event.event_format], f"{event.duration_hours:g} ч", f"Старт: {session}"]
+        gains = "".join(
+            f'<span class="cq-gain">{_hint(_skill_name(dataset, key), f"{dataset.skill(key).name} · {key}")}'
+            f" {before} → <b>{after}</b></span>"
+            for key, (before, after) in rec.skill_changes.items()
+        )
+        title = _hint(EVENT_LABELS.get(event.title, event.title), f"{event.title} · {event.event_id}")
+        badge = '<div class="cq-rec-top">Лучший следующий шаг</div>' if top else ""
         st.markdown(
-            "### " + _hint(EVENT_LABELS.get(event.title, event.title), f"{event.title} · {event.event_id}"),
+            f'{badge}<div class="cq-rec-title">{title}</div>'
+            + "".join(f'<span class="cq-chip">{escape(chip)}</span>' for chip in chips)
+            + f"<div>{gains}</div>",
             unsafe_allow_html=True,
         )
-        session = rec.next_session.strftime("%d.%m.%Y") if rec.next_session else "можно начать в любое время"
-        st.caption(f"{FORMAT_LABELS[event.event_format]} · {event.duration_hours:g} ч · {session}")
-        st.write("После завершения вы сможете:")
-        for key, (before, after) in rec.skill_changes.items():
-            original = f"{dataset.skill(key).name} · {key} · {before} → {after}"
-            st.markdown(
-                _hint(_skill_name(dataset, key), original) + ": " + _level_hint(before) + " → " + _level_hint(after),
-                unsafe_allow_html=True,
-            )
         st.write("Почему этот шаг подходит")
         _explanation(rec, employee, language)
         with st.expander("Описание занятия и демонстрация завершения"):
@@ -454,7 +535,7 @@ def _recommendations(dataset: Dataset, employee: Employee, viewer: Viewer) -> No
     if not candidates:
         st.info("Подходящих шагов сейчас нет: цель может быть достигнута или в каталоге нет подходящих занятий.")
         return
-    _recommendation_card(dataset, employee, candidates[0], viewer, language)
+    _recommendation_card(dataset, employee, candidates[0], viewer, language, top=True)
     if len(candidates) > 1:
         with st.expander(f"Другие варианты · {len(candidates) - 1}"):
             for rec in candidates[1:]:
@@ -493,7 +574,10 @@ def _employee_view(dataset: Dataset, viewer: Viewer) -> None:
     st.caption(
         f"{employee.department} · {_role_label(employee.role, employee.grade)} · стаж {employee.tenure_months} мес."
     )
+    quest = build_quest(dataset, employee.employee_id)
+    _hero(employee, quest)
     _recommendations(dataset, employee, viewer)
+    _quest(dataset, quest)
     _trajectory(dataset, employee)
     _history(dataset, employee)
 
@@ -635,8 +719,12 @@ def _data_view(dataset: Dataset, viewer: Viewer) -> None:
 def main() -> None:
     """Run the role-scoped Streamlit application using shared data/scoring services."""
     st.set_page_config(page_title="Career Quest", page_icon="🌱", layout="wide")
-    st.title("🌱 Career Quest")
-    st.caption("Понятный следующий шаг в профессиональном развитии")
+    st.markdown(STYLE, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="cq-brand"><b>🌱 Career Quest</b>'
+        "<span>Понятный следующий шаг в профессиональном развитии</span></div>",
+        unsafe_allow_html=True,
+    )
     viewer = _login()
     if viewer is None:
         return
