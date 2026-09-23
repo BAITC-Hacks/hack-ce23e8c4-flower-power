@@ -235,10 +235,12 @@ def _readable_event(ds: Dataset, rec: dict[str, Any]) -> str:
         f"Зачем: занятие развивает навыки «{names}» и помогает приблизиться к выбранной цели.",
     ]
     changes = [
-        f"• {_skill_label(ds, key)}: {LEVEL_LABELS[after].lower()}." for key, (_, after) in rec["skill_changes"].items()
+        f"• {_skill_label(ds, key)}: {before} → {after} ({LEVEL_LABELS[after].lower()})."
+        for key, (before, after) in rec["skill_changes"].items()
     ]
     result.append("Ожидаемый уровень после прохождения:\n" + "\n".join(changes))
-    start = rec["next_session"] or "в любое время"
+    session = rec["next_session"]
+    start = f"{session[8:10]}.{session[5:7]}.{session[:4]}" if session else "в любое время"
     result.append(f"Что потребуется: {event.duration_hours:g} ч · {FORMAT_LABELS[event.event_format]} · старт {start}.")
     if any(f["code"] == "history_avoidance" for f in rec["factors"]):
         result.append("Похожие занятия раньше оставались незавершёнными. Это учтено; можно рассмотреть другой вариант.")

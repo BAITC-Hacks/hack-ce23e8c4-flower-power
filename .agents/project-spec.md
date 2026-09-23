@@ -52,7 +52,7 @@ Scoring weights: fit & working (25), technical implementation (25), **README & r
 | `tests/test_data.py`, `tests/test_scoring.py` (incl. trap profiles) | Eldana | |
 | `README.md` | Eldana | |
 | `career_quest/explain.py` — LLM justification from computed factors | Ayazhan | |
-| `app.py` — Streamlit UI: employee view, HR view, role switch, file upload | Ayazhan | |
+| `career_quest/api.py` + `web/` — FastAPI server and web client: employee view, HR view, role switch, file upload (replaced the Streamlit `app.py`) | Eldana, Ayazhan | done |
 | `Dockerfile`, `docker-compose.yml` | Ayazhan | |
 | `pyproject.toml`, `uv.lock` | shared — announce before editing | |
 

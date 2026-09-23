@@ -185,3 +185,11 @@ def test_negated_or_different_direction_does_not_match_guided_shortcut(ds: Datas
     changed = assistant.answer(ds, "E0001", "хочу стать тимлидом в аналитике", pending_goal=first.suggestion)
     assert changed.suggestion is not None
     assert changed.suggestion.target_role == "Data Analyst"
+
+
+def test_russian_plan_shows_level_growth_and_local_date(ds: Dataset) -> None:
+    reply = assistant.answer(ds, "E0001", "как мне стать тимлидом?", "ru")
+
+    assert reply.intent == "goal"
+    assert "Лидерство: 1 → 2 (" in reply.text
+    assert "старт 08.10.2026" in reply.text
