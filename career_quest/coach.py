@@ -18,6 +18,7 @@ import structlog
 from pydantic import BaseModel, ValidationError
 
 from career_quest.data import Dataset
+from career_quest.llm import output_text, post
 from career_quest.models import GRADE_ORDER, CareerGoal, Grade, Language, next_grade
 
 log = structlog.get_logger(__name__)
@@ -79,7 +80,7 @@ def suggest_goal(ds: Dataset, employee_id: str, wish: str, language: Language) -
     if os.environ.get("OPENAI_API_KEY", "").strip():
         try:
             suggestion = _ai_goal(ds, employee_id, wish, language)
-        except (OSError, ValueError, HTTPException, urllib.error.URLError, ValidationError, KeyError) as exc:
+        except (OSError, ValueError, HTTPException, urllib.error.URLError, ValidationError, KeyError, TypeError) as exc:
             log.warning("coach_ai_fallback", employee_id=employee_id, error_type=type(exc).__name__)
         else:
             log.info("coach_ai_goal", employee_id=employee_id, found=suggestion is not None)
@@ -130,6 +131,8 @@ def _ai_goal(ds: Dataset, employee_id: str, wish: str, language: Language) -> Go
         "instructions": (
             "You map an employee's career wish to exactly one (role, grade) from the given enums. "
             f"The employee is now {employee.role} {employee.grade}. Grades in order: {', '.join(GRADE_ORDER)}. "
+            "Only map explicit career wishes. Questions about recommendations, skills, unrelated topics, "
+            "negated goals or ambiguous alternatives must return NONE, not a guessed goal. "
             "If the wish names no grade, choose the next grade in the wished role, or the current grade if the role "
             f"changes. If no role fits, use {NO_MATCH}. The reason is one short neutral sentence in "
             f"{LANGUAGE_NAMES[language]} that quotes the wish, without promises of promotion. "
@@ -149,29 +152,21 @@ def _ai_goal(ds: Dataset, employee_id: str, wish: str, language: Language) -> Go
 
 
 def _post(payload: dict[str, Any]) -> dict[str, Any]:
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"}
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses", data=json.dumps(payload).encode(), headers=headers, method="POST"
-    )
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed https URL
-        result: dict[str, Any] = json.loads(response.read())
-    return result
+    return post(payload)
 
 
 def _output_text(body: dict[str, Any]) -> str:
-    if body.get("status") != "completed":
-        raise ValueError("model response is incomplete")
-    parts = [part for item in body.get("output", []) if item.get("type") == "message" for part in item["content"]]
-    if any(part.get("type") == "refusal" for part in parts):
-        raise ValueError("model refused")
-    return "".join(part.get("text", "") for part in parts if part.get("type") == "output_text")
+    return output_text(body)
 
 
 def _keyword_goal(ds: Dataset, employee_id: str, wish: str) -> GoalSuggestion | None:
     employee = ds.employee(employee_id)
     text = wish.lower()
     words = set(re.findall(r"\w+", text))
-    role = next((r for r, stems in ROLE_KEYWORDS.items() if any(_mentions(text, words, s) for s in stems)), None)
+    roles = [r for r, stems in ROLE_KEYWORDS.items() if any(_mentions(text, words, s) for s in stems)]
+    if len(roles) > 1 or words & {"не", "not", "don't", "емес"}:
+        return None
+    role = roles[0] if roles else None
     grade = next((g for g, stems in GRADE_KEYWORDS.items() if any(_mentions(text, words, s) for s in stems)), None)
     if role is None and grade is None:
         return None

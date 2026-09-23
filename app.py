@@ -19,7 +19,8 @@ import streamlit as st
 import structlog
 
 from career_quest.access import Viewer, authenticate, can_view_employee, configured_access, require_hr
-from career_quest.coach import GoalSuggestion, set_goal, suggest_goal
+from career_quest.assistant import Reply, answer
+from career_quest.coach import set_goal
 from career_quest.data import Dataset, DatasetError, load_dataset
 from career_quest.explain import deterministic_explanation, explain, llm_configured
 from career_quest.labels import (
@@ -280,37 +281,58 @@ def _quest(dataset: Dataset, quest: Quest | None) -> None:
     st.caption("Достижения личные: они не сравниваются с коллегами и не влияют на оценку.")
 
 
+def _ask_assistant(dataset: Dataset, employee: Employee, wish: str, language: Language) -> Reply:
+    key = f"{st.session_state.get('revision', 0)}:{employee.employee_id}:{language}"
+    threads = cast(dict[str, list[dict[str, str]]], st.session_state.setdefault("dialogue", {}))
+    history = threads.setdefault(key, [])
+    replies = cast(dict[str, Reply], st.session_state.setdefault("assistant_replies", {}))
+    cache_key = f"{key}:{wish.strip()}"
+    if history and history[-1].get("request") == cache_key:
+        return replies[cache_key]
+    count = int(st.session_state.get("assistant_calls", 0))
+    reply = answer(
+        dataset,
+        employee.employee_id,
+        wish,
+        language,
+        [{"role": row["role"], "text": row["text"]} for row in history[-6:]],
+        allow_ai=count < 40,
+    )
+    st.session_state["assistant_calls"] = count + int(llm_configured() and count < 40)
+    history.extend(
+        [{"role": "user", "text": wish}, {"role": "assistant", "text": reply.text[:1800], "request": cache_key}]
+    )
+    threads[key] = history[-6:]
+    replies[cache_key] = reply
+    return reply
+
+
 def _coach(dataset: Dataset, employee: Employee, viewer: Viewer) -> None:
-    suggestions = cast(dict[str, GoalSuggestion | None], st.session_state.setdefault("coach", {}))
+    key = f"assistant_visible_{employee.employee_id}_{st.session_state.get('revision', 0)}"
     with st.container(border=True):
-        st.markdown("**🤖 AI-коуч: кем вы хотите стать?**")
+        st.markdown("**🤖 Карьерный помощник: разберём следующий шаг**")
         st.caption(
-            "Напишите своими словами — на русском, қазақша или English. "
-            "Коуч выберет цель только из справочника ролей банка; в AI уходят лишь ваш текст и текущая роль."
+            "Навыки, причины рекомендаций, альтернативы и карьерная цель. "
+            "AI получает последние сообщения и расчётные факты вашего профиля, без имени."
         )
         with st.form(f"coach_{employee.employee_id}", border=False):
-            wish = st.text_input("Ваша цель", placeholder="Например: хочу через год стать тимлидом в аналитике")
-            asked = st.form_submit_button("Подобрать цель")
-        if asked:
-            with st.spinner("Коуч подбирает цель…"):
-                suggestions[employee.employee_id] = suggest_goal(dataset, employee.employee_id, wish, "ru")
-        if employee.employee_id not in suggestions:
+            wish = st.text_input("Ваш вопрос", placeholder="Каких навыков мне не хватает?", max_chars=500)
+            language = cast(Language, st.selectbox("Язык ответа", ["ru", "kk", "en"]))
+            asked = st.form_submit_button("Спросить")
+        if asked and wish.strip():
+            with st.spinner("Разбираем данные профиля…"):
+                st.session_state[key] = _ask_assistant(dataset, employee, wish, language)
+        reply = cast(Reply | None, st.session_state.get(key))
+        if reply is None:
             return
-        suggestion = suggestions[employee.employee_id]
-        if suggestion is None:
-            st.info("Не нашли подходящую роль в справочнике. Попробуйте назвать направление или уровень.")
-            return
-        source = "AI" if suggestion.source == "ai" else "по ключевым словам (без AI)"
-        st.markdown(
-            f"Предлагаемая цель: **{escape(_role_label(suggestion.target_role, suggestion.target_grade))}**  \n"
-            f"{escape(suggestion.reason)} · _подобрано {source}_"
-        )
-        if st.button("Сделать целью и пересчитать шаги", key=f"set_goal_{employee.employee_id}", type="primary"):
+        st.text(reply.text)
+        st.caption("Разбор с LLM по проверенным данным" if reply.source == "ai" else "Локальный ответ без LLM")
+        suggestion = reply.suggestion
+        if suggestion and st.button("Сделать целью и пересчитать шаги", key=f"set_goal_{employee.employee_id}"):
             if not can_view_employee(viewer, employee.employee_id):
                 st.error("Нет доступа к этому профилю")
                 return
             goal = CareerGoal(target_role=suggestion.target_role, target_grade=suggestion.target_grade)
-            suggestions.pop(employee.employee_id)
             _replace_dataset(
                 set_goal(dataset, employee.employee_id, goal),
                 f"Цель обновлена: {_role_label(goal.target_role, goal.target_grade)}. Шаги пересчитаны.",

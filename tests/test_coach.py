@@ -99,7 +99,7 @@ def test_coach_sets_goal_in_the_app(monkeypatch: pytest.MonkeyPatch) -> None:
     identifier = app.session_state["dataset"].employees[0].employee_id
 
     app.text_input[0].input("хочу стать тимлидом в аналитике").run()
-    next(button for button in app.button if button.label == "Подобрать цель").click().run()
+    next(button for button in app.button if button.label == "Спросить").click().run()
     app.button(key=f"set_goal_{identifier}").click().run()
 
     assert not app.exception
