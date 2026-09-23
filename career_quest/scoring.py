@@ -21,6 +21,7 @@ WEIGHTS: dict[str, float] = {
     "critical_gap": 3.0,
     "required_gap": 1.5,
     "target_alignment": 1.0,
+    "grade_fit": 0.5,
     "goal_alignment": 0.5,
     "history_avoidance_skill": -1.0,
     "history_avoidance_type": -0.5,
@@ -31,6 +32,7 @@ WEIGHTS: dict[str, float] = {
     "duration": -0.05,
 }
 MIN_FACTORS = 3
+GAP_CODES = frozenset({"critical_gap", "required_gap"})
 SOON_DAYS = 14
 LONG_EVENT_HOURS = 8.0
 ENGAGEMENT_CAP = 2
@@ -169,7 +171,11 @@ def recommend(ds: Dataset, employee_id: str, limit: int = 3) -> list[Recommendat
         as_of=ds.as_of_date,
     )
     recommendations = [_score(event, ctx) for event in _candidates(ds, ctx)]
-    shown = [rec for rec in recommendations if rec.score > 0 and len(rec.factors) >= MIN_FACTORS]
+    shown = [
+        rec
+        for rec in recommendations
+        if rec.score > 0 and len(rec.factors) >= MIN_FACTORS and any(f.code in GAP_CODES for f in rec.factors)
+    ]
     shown.sort(key=lambda rec: (-rec.score, rec.event_id))
     log.debug("recommended", employee_id=employee_id, candidates=len(recommendations), shown=len(shown[:limit]))
     return shown[:limit]
@@ -305,10 +311,18 @@ def _gap_factors(changes: dict[str, tuple[int, int]], target: RoleProfile) -> li
 
 
 def _alignment_factors(event: Event, ctx: _Context) -> list[Factor]:
-    """Whether the event is designed for the target position and serves an explicit career goal."""
+    """Whether the event is designed for the target position (or at least the current grade) and serves the goal."""
     target = ctx.target
     if target.role not in event.target_roles or target.grade not in event.target_grades:
-        return []
+        if ctx.employee.grade == target.grade or ctx.employee.grade not in event.target_grades:
+            return []
+        return [
+            Factor(
+                code="grade_fit",
+                weight=WEIGHTS["grade_fit"],
+                detail=f"Designed for the current grade {ctx.employee.grade}, builds the base for {target.grade}",
+            )
+        ]
     goal = ctx.employee.career_goal
     from_goal = goal is not None and (goal.target_role, goal.target_grade) == (target.role, target.grade)
     if from_goal:
