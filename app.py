@@ -19,9 +19,10 @@ import streamlit as st
 import structlog
 
 from career_quest.access import Viewer, authenticate, can_view_employee, configured_access, require_hr
+from career_quest.coach import GoalSuggestion, set_goal, suggest_goal
 from career_quest.data import Dataset, DatasetError, load_dataset
 from career_quest.explain import deterministic_explanation, explain, llm_configured
-from career_quest.models import Employee, Language
+from career_quest.models import CareerGoal, Employee, Language
 from career_quest.quest import BADGES, Quest, build_quest
 from career_quest.scoring import Recommendation, complete_activity, effective_skills, recommend, target_profile
 from career_quest.snapshot import FILENAMES, export_snapshot, import_additions, import_snapshot
@@ -424,6 +425,43 @@ def _quest(dataset: Dataset, quest: Quest | None) -> None:
     st.caption("Достижения личные: они не сравниваются с коллегами и не влияют на оценку.")
 
 
+def _coach(dataset: Dataset, employee: Employee, viewer: Viewer) -> None:
+    suggestions = cast(dict[str, GoalSuggestion | None], st.session_state.setdefault("coach", {}))
+    with st.container(border=True):
+        st.markdown("**🤖 AI-коуч: кем вы хотите стать?**")
+        st.caption(
+            "Напишите своими словами — на русском, қазақша или English. "
+            "Коуч выберет цель только из справочника ролей банка; в AI уходят лишь ваш текст и текущая роль."
+        )
+        with st.form(f"coach_{employee.employee_id}", border=False):
+            wish = st.text_input("Ваша цель", placeholder="Например: хочу через год стать тимлидом в аналитике")
+            asked = st.form_submit_button("Подобрать цель")
+        if asked:
+            with st.spinner("Коуч подбирает цель…"):
+                suggestions[employee.employee_id] = suggest_goal(dataset, employee.employee_id, wish, "ru")
+        if employee.employee_id not in suggestions:
+            return
+        suggestion = suggestions[employee.employee_id]
+        if suggestion is None:
+            st.info("Не нашли подходящую роль в справочнике. Попробуйте назвать направление или уровень.")
+            return
+        source = "AI" if suggestion.source == "ai" else "по ключевым словам (без AI)"
+        st.markdown(
+            f"Предлагаемая цель: **{escape(_role_label(suggestion.target_role, suggestion.target_grade))}**  \n"
+            f"{escape(suggestion.reason)} · _подобрано {source}_"
+        )
+        if st.button("Сделать целью и пересчитать шаги", key=f"set_goal_{employee.employee_id}", type="primary"):
+            if not can_view_employee(viewer, employee.employee_id):
+                st.error("Нет доступа к этому профилю")
+                return
+            goal = CareerGoal(target_role=suggestion.target_role, target_grade=suggestion.target_grade)
+            suggestions.pop(employee.employee_id)
+            _replace_dataset(
+                set_goal(dataset, employee.employee_id, goal),
+                f"Цель обновлена: {_role_label(goal.target_role, goal.target_grade)}. Шаги пересчитаны.",
+            )
+
+
 def _trajectory(dataset: Dataset, employee: Employee) -> None:
     _garden(dataset, employee)
 
@@ -576,6 +614,7 @@ def _employee_view(dataset: Dataset, viewer: Viewer) -> None:
     )
     quest = build_quest(dataset, employee.employee_id)
     _hero(employee, quest)
+    _coach(dataset, employee, viewer)
     _recommendations(dataset, employee, viewer)
     _quest(dataset, quest)
     _trajectory(dataset, employee)
