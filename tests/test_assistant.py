@@ -199,8 +199,8 @@ def test_russian_plan_shows_level_growth_and_local_date(ds: Dataset) -> None:
     ("message", "language", "prefix"),
     [
         ("Hi!", "en", "Hi!"),
-        ("привет", "ru", "Привет!"),
-        ("сәлем", "kk", "Сәлем!"),
+        ("привет", "ru", "Здравствуйте!"),
+        ("сәлем", "kk", "Сәлеметсіз бе!"),
         ("thanks", "en", "You're welcome"),
         ("қазақша", "kk", "Жақсы"),
         ("ответь по-казахски", "kk", "Жақсы"),
@@ -270,3 +270,22 @@ def test_unverifiable_prose_uses_visible_fallback(ds: Dataset, monkeypatch: pyte
     reply = assistant.answer(ds, "E0001", "Why this activity?", event_id=event, auto_language=True)
     assert reply.source == "local"
     assert prose not in reply.text
+
+
+def test_model_prose_shows_names_instead_of_internal_codes(ds: Dataset) -> None:
+    text = "Курс EV_005 развивает навык публичных выступлений (SK_PUBLIC_SPEAKING) и SK_SYSTEM_DESIGN."
+
+    readable = assistant._readable_codes(ds, text, "ru")
+
+    assert "SK_" not in readable
+    assert "EV_" not in readable
+    assert "Основы проектирования систем" in readable
+    assert "Проектирование систем" in readable
+
+
+def test_evidence_contains_russian_names_for_the_model(ds: Dataset) -> None:
+    evidence = assistant.context(ds, "E0001")
+
+    assert all(gap["name_ru"] for gap in evidence["gaps"])
+    assert all(rec["title_ru"] and rec["skill_names_ru"] for rec in evidence["recommendations"])
+    assert evidence["target_ru"] == "Разработчик серверной части · Самостоятельный специалист"

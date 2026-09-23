@@ -59,6 +59,10 @@ if the user explicitly considers several roles or the catalog has no suitable pr
 'What should I do?' after a proposed goal means a development plan for that goal, not the old target.
 A goal is a proposal, not a change. Other actions must use an empty goal_key.
 Unused ID arrays must be empty. Never invent IDs, numbers or facts.
+In Russian responses use title_ru, name_ru, skill_names_ru and target_ru instead of English catalog names.
+Never write SK_ or EV_ codes in the response. Address the user formally (вы / сіз / you).
+Price, instructor, location, certificates and schedules beyond next_session are not in the data: say so and
+suggest asking HR or the learning team; never mention external websites or organizers.
 Use response for readable prose; source numbers and facts remain available separately for audit.
 """
 STATUS: dict[Language, dict[str, str]] = {
@@ -155,6 +159,7 @@ def context(ds: Dataset, employee_id: str) -> dict[str, Any]:
             {
                 "skill_id": key,
                 "name": ds.skill(key).name,
+                "name_ru": _skill_label(ds, key),
                 "current": levels.get(key, 0),
                 "required": required,
                 "critical": key in target.critical_skills,
@@ -170,8 +175,17 @@ def context(ds: Dataset, employee_id: str) -> dict[str, Any]:
         "target": None if target is None else {"role": target.role, "grade": target.grade},
         "gaps": gaps,
         "recommendations": [
-            {**rec.model_dump(mode="json"), "title": ds.event(rec.event_id).title} for rec in recommend(ds, employee_id)
+            {
+                **rec.model_dump(mode="json"),
+                "title": ds.event(rec.event_id).title,
+                "title_ru": EVENT_LABELS.get(ds.event(rec.event_id).title, ds.event(rec.event_id).title),
+                "skill_names_ru": {key: _skill_label(ds, key) for key in rec.skill_changes},
+            }
+            for rec in recommend(ds, employee_id)
         ],
+        "target_ru": None
+        if target is None
+        else f"{ROLE_LABELS.get(target.role, target.role)} · {GRADE_LABELS.get(target.grade, target.grade)}",
         "catalog": [f"{p.role}|{p.grade}" for p in ds.role_profiles],
     }
 
@@ -226,6 +240,23 @@ def _validate_response(decision: Decision, evidence: dict[str, Any]) -> None:
     selected = evidence.get("selected_event_id")
     if decision.response and selected and decision.intent == "explain" and decision.event_ids != [selected]:
         raise AIUnavailableError("wrong_activity")
+
+
+def _readable_codes(ds: Dataset, text: str, language: Language) -> str:
+    """Replace internal SK_/EV_ codes in model prose with display names; drop codes already named in brackets."""
+    text = re.sub(r"\s*\((?:SK|EV)_[A-Za-z0-9_]+\)", "", text)
+
+    def name(match: re.Match[str]) -> str:
+        code = match.group(0)
+        try:
+            if code.startswith("SK_"):
+                return _skill_label(ds, code) if language == "ru" else ds.skill(code).name
+            title = ds.event(code).title
+            return EVENT_LABELS.get(title, title) if language == "ru" else title
+        except KeyError:
+            return code
+
+    return re.sub(r"\b(?:SK|EV)_[A-Za-z0-9_]+\b", name, text)
 
 
 def _decision_schema() -> dict[str, Any]:
@@ -491,7 +522,11 @@ def answer(
     if suggestion:
         return _goal_preview(ds, employee_id, suggestion, source, language, status)
     decision = _anchor_activity(decision, event_id)
-    text = decision.response if source == "ai" and decision.response else _render(ds, decision, evidence, language)
+    text = (
+        _readable_codes(ds, decision.response, language)
+        if source == "ai" and decision.response
+        else _render(ds, decision, evidence, language)
+    )
     if source == "local":
         text = STATUS[language].get(status, STATUS[language]["other"]) + "\n\n" + text
     return Reply(
