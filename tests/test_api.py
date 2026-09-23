@@ -200,3 +200,34 @@ def test_explanations_are_cached_per_profile(client: TestClient, monkeypatch: py
         response = client.post("/api/employees/E0001/explain", json={"event_id": event})
         assert response.json()["text"] == "Saved explanation"
     assert calls == ["call"]
+
+
+def test_assistant_session_limit_prevents_provider_call(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    login(client, role="employee")
+    session = next(iter(api._SESSIONS.values()))
+    session.ai_calls = 40
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def forbidden_call(*args: object) -> object:
+        del args
+        raise AssertionError("AI must not run after the session limit")
+
+    monkeypatch.setattr("career_quest.assistant.post", forbidden_call)
+    response = client.post("/api/employees/E0001/assistant", json={"wish": "Какие навыки развивать?"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "limit"
+    assert response.json()["source"] == "local"
+    assert session.ai_calls == 40
+
+
+def test_goal_change_clears_old_dialogue_and_keeps_budget(client: TestClient) -> None:
+    login(client, role="employee")
+    client.post("/api/employees/E0001/assistant", json={"wish": "Какие навыки развивать?"})
+    session = next(iter(api._SESSIONS.values()))
+    session.ai_calls = 3
+    assert session.dialogue
+    changed = client.post("/api/employees/E0001/goal", json={"target_role": "Data Analyst", "target_grade": "Senior"})
+    assert changed.status_code == 200
+    assert not session.dialogue
+    assert not session.ai_cache
+    assert session.ai_calls == 3

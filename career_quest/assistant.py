@@ -15,10 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from career_quest.coach import GoalSuggestion, suggest_goal
 from career_quest.data import Dataset
 from career_quest.explain import llm_configured
+from career_quest.factor_text import russian_detail
 from career_quest.labels import EVENT_LABELS, SKILL_LABELS
 from career_quest.llm import AIUnavailableError, output_text, post
 from career_quest.models import Language
-from career_quest.scoring import effective_skills, recommend, target_profile
+from career_quest.scoring import Factor, effective_skills, recommend, target_profile
 
 log = structlog.get_logger(__name__)
 Intent = Literal["gaps", "explain", "alternatives", "goal", "clarify", "out_of_scope"]
@@ -183,7 +184,14 @@ def _local(
     ), suggestion
 
 
-def _render(decision: Decision, evidence: dict[str, Any], language: Language) -> str:
+def _factor_line(ds: Dataset, raw: dict[str, Any], language: Language) -> str:
+    factor = Factor.model_validate(raw)
+    if language == "en":
+        return factor.detail
+    return russian_detail(factor, lambda key: SKILL_LABELS.get(ds.skill(key).name, ds.skill(key).name))
+
+
+def _render(ds: Dataset, decision: Decision, evidence: dict[str, Any], language: Language) -> str:
     titles = TITLES[language]
     if decision.intent in {"clarify", "out_of_scope"}:
         return titles[2 if decision.intent == "clarify" else 3]
@@ -214,7 +222,7 @@ def _render(decision: Decision, evidence: dict[str, Any], language: Language) ->
     rows = [r for r in evidence["recommendations"] if r["event_id"] in decision.event_ids]
     sections = [
         f"{EVENT_LABELS.get(r['title'], r['title'])} ({r['event_id']})\n"
-        + "\n".join(f"• {f['detail']}" for f in r["factors"])
+        + "\n".join("• " + _factor_line(ds, f, language) for f in r["factors"])
         for r in rows
     ]
     return (
@@ -264,7 +272,7 @@ def answer(
             }
         )
     text = (
-        _render(decision, evidence, language)
+        _render(ds, decision, evidence, language)
         if suggestion is None
         else (f"Предлагаемая цель: {suggestion.target_role} · {suggestion.target_grade}.\n{suggestion.reason}")
     )
