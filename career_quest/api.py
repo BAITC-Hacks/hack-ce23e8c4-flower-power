@@ -79,6 +79,7 @@ class WishBody(BaseModel):
     """Free-text career wish for the coach."""
 
     wish: str = Field(min_length=1, max_length=500)
+    event_id: str | None = None
     language: Language = "ru"
 
 
@@ -377,6 +378,16 @@ def coach(employee_id: str, body: WishBody, response: Response, cq_session: Sess
     return assistant_reply(employee_id, body, response, cq_session)
 
 
+def _thread_key(session: _Session, employee_id: str, body: WishBody) -> str:
+    if body.event_id is not None:
+        eligible = {r.event_id for r in recommend(session.dataset, employee_id)}
+        if body.event_id not in eligible:
+            raise HTTPException(
+                status_code=404, detail="Это занятие больше не входит в рекомендации. Обновите профиль."
+            )
+    return f"{employee_id}:{body.event_id or 'general'}:{body.language}"
+
+
 @app.post("/api/employees/{employee_id}/assistant")
 def assistant_reply(
     employee_id: str, body: WishBody, response: Response, cq_session: SessionCookie = None
@@ -387,9 +398,10 @@ def assistant_reply(
     _require_own_goal(session)
     if not body.wish.strip():
         raise HTTPException(status_code=422, detail="Напишите вопрос о карьерном развитии")
+    thread = _thread_key(session, employee_id, body)
     with session.ai_lock:
-        history = session.dialogue.setdefault(employee_id, [])
-        key = f"assistant:{id(session.dataset)}:{employee_id}:{body.language}:{body.wish.strip()}"
+        history = session.dialogue.setdefault(thread, [])
+        key = f"assistant:{id(session.dataset)}:{thread}:{body.wish.strip()}"
         if history and history[-1].get("request_key") == key:
             return dict(session.ai_cache[key])
         reply = answer(
@@ -399,19 +411,20 @@ def assistant_reply(
             body.language,
             [{"role": row["role"], "text": row["text"]} for row in history[-6:]],
             allow_ai=session.ai_calls < 40,
-            pending_goal=session.pending_goals.get(employee_id),
+            pending_goal=session.pending_goals.get(thread),
+            event_id=body.event_id,
         )
         session.ai_calls += int(
             llm_configured() and session.ai_calls < 40 and not (reply.status == "preview" and reply.source == "local")
         )
         result = reply.model_dump()
         if reply.suggestion:
-            session.pending_goals[employee_id] = reply.suggestion
+            session.pending_goals[thread] = reply.suggestion
             result["suggestion"]["label"] = _role_label(reply.suggestion.target_role, reply.suggestion.target_grade)
         history.extend(
             [{"role": "user", "text": body.wish}, {"role": "assistant", "text": reply.text[:1800], "request_key": key}]
         )
-        session.dialogue[employee_id] = history[-6:]
+        session.dialogue[thread] = history[-6:]
         session.ai_cache[key] = result
         return result
 
