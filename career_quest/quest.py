@@ -130,3 +130,25 @@ def _came_back(ds: Dataset, history: list[ActivityRecord]) -> bool:
         elif record.status == "completed" and skills & skipped:
             return True
     return False
+
+
+def coverage_gain(quest: Quest, skill_changes: dict[str, tuple[int, int]]) -> float:
+    """Return how much ``quest.coverage`` grows if the given skill changes happen.
+
+    Args:
+        quest: Current quest.
+        skill_changes: Skill id -> (current level, level after completion), as in a recommendation.
+
+    Returns:
+        Coverage increase, 0–1.
+    """
+    required = {m.skill_id: m.required for m in quest.milestones}
+    total = sum(required.values())
+    if not total:
+        return 0.0
+    closed = sum(
+        max(0, min(after, required[skill_id]) - min(before, required[skill_id]))
+        for skill_id, (before, after) in skill_changes.items()
+        if skill_id in required
+    )
+    return closed / total

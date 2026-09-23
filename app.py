@@ -22,173 +22,26 @@ from career_quest.access import Viewer, authenticate, can_view_employee, configu
 from career_quest.coach import GoalSuggestion, set_goal, suggest_goal
 from career_quest.data import Dataset, DatasetError, load_dataset
 from career_quest.explain import deterministic_explanation, explain, llm_configured
+from career_quest.labels import (
+    BADGE_LABELS,
+    EVENT_LABELS,
+    FACTOR_LABELS,
+    FORMAT_LABELS,
+    GRADE_LABELS,
+    LEVEL_LABELS,
+    ROLE_LABELS,
+    SKILL_LABELS,
+    STATUS_LABELS,
+)
 from career_quest.models import CareerGoal, Employee, Language
-from career_quest.quest import BADGES, Quest, build_quest
+from career_quest.quest import BADGES, Quest, build_quest, coverage_gain
 from career_quest.scoring import Recommendation, complete_activity, effective_skills, recommend, target_profile
 from career_quest.snapshot import FILENAMES, export_snapshot, import_additions, import_snapshot
 
 log = structlog.get_logger(__name__)
 DATA_DIR = Path(os.environ.get("CQ_DATA_DIR", str(Path(__file__).resolve().parent / "data")))
-STATUS_LABELS = {
-    "completed": "Завершено",
-    "in_progress": "В процессе",
-    "dropped": "Прекращено",
-    "no_show": "Пропуск",
-    "declined": "Отказ",
-    "overdue": "Просрочено",
-}
-FORMAT_LABELS = {"online": "Онлайн", "offline": "Очно", "self_paced": "В своём темпе"}
 
 
-LEVEL_LABELS = {
-    0: "Ещё не знаком",
-    1: "Знаю основы",
-    2: "Решаю типовые задачи с поддержкой",
-    3: "Работаю самостоятельно",
-    4: "Решаю сложные задачи и помогаю другим",
-    5: "Задаю стандарты",
-}
-ROLE_LABELS = {
-    "Backend Engineer": "Разработчик серверной части",
-    "Frontend Engineer": "Разработчик интерфейсов",
-    "Data Analyst": "Аналитик данных",
-    "QA Engineer": "Инженер по качеству",
-    "Product Manager": "Менеджер продукта",
-    "HR Business Partner": "HR-партнёр",
-    "Sales Manager": "Менеджер по продажам",
-    "Customer Support Specialist": "Специалист поддержки",
-}
-GRADE_LABELS = {
-    "Junior": "Начинающий",
-    "Middle": "Самостоятельный специалист",
-    "Senior": "Старший специалист",
-    "Lead": "Ведущий специалист",
-}
-SKILL_LABELS = {
-    "Python": "Программирование на Python",
-    "Java": "Программирование на Java",
-    "SQL": "Запросы к данным (SQL)",
-    "API Design": "Проектирование API",
-    "System Design": "Проектирование систем",
-    "Cloud Platforms": "Облачные платформы",
-    "Containers & Orchestration": "Контейнеры и управление ими",
-    "CI/CD": "Автоматизация сборки и выпуска",
-    "Application Security": "Безопасность приложений",
-    "Observability": "Мониторинг работы систем",
-    "JavaScript": "Программирование на JavaScript",
-    "TypeScript": "Программирование на TypeScript",
-    "React": "Интерфейсы на React",
-    "HTML & CSS": "Вёрстка страниц",
-    "Web Performance": "Быстродействие сайтов",
-    "Web Accessibility": "Доступность интерфейсов",
-    "Test Design": "Проектирование тестов",
-    "Test Automation": "Автоматизация тестирования",
-    "API Testing": "Тестирование API",
-    "Load Testing": "Нагрузочное тестирование",
-    "Statistics": "Статистика",
-    "A/B Testing": "A/B-тестирование",
-    "Data Visualization": "Визуализация данных",
-    "BI Tools": "Инструменты бизнес-аналитики",
-    "Data Modeling": "Моделирование данных",
-    "Machine Learning Fundamentals": "Основы машинного обучения",
-    "Product Discovery": "Поиск потребностей пользователей",
-    "Roadmapping & Prioritization": "Планирование и приоритеты",
-    "Product Analytics": "Продуктовая аналитика",
-    "UX Research": "Исследование опыта пользователей",
-    "Requirements Writing": "Описание требований",
-    "Agile Practices": "Гибкие методы работы",
-    "Project Management": "Управление проектами",
-    "Talent Acquisition": "Подбор сотрудников",
-    "Employee Relations": "Взаимоотношения с сотрудниками",
-    "Labor Law": "Трудовое право",
-    "HR Analytics": "HR-аналитика",
-    "Learning Program Design": "Разработка учебных программ",
-    "Compensation & Benefits": "Оплата труда и льготы",
-    "Prospecting": "Поиск клиентов",
-    "Negotiation": "Переговоры",
-    "CRM Systems": "Системы работы с клиентами (CRM)",
-    "Account Management": "Развитие отношений с клиентами",
-    "Product Knowledge": "Знание продукта",
-    "Customer Service": "Клиентский сервис",
-    "Technical Troubleshooting": "Решение технических проблем",
-    "Communication": "Общение",
-    "Public Speaking": "Публичные выступления",
-    "Written Communication": "Письменное общение",
-    "Stakeholder Management": "Работа с заинтересованными сторонами",
-    "Leadership": "Лидерство",
-    "Mentoring": "Наставничество",
-    "Feedback": "Обратная связь",
-    "Conflict Resolution": "Разрешение конфликтов",
-    "Teamwork": "Командная работа",
-    "Emotional Intelligence": "Эмоциональный интеллект",
-    "Problem Solving": "Решение проблем",
-    "Critical Thinking": "Критическое мышление",
-    "Time Management": "Управление временем",
-    "Adaptability": "Адаптивность",
-}
-EVENT_LABELS = {
-    "Information Security Awareness": "Информационная безопасность",
-    "Personal Data Protection": "Защита персональных данных",
-    "Code of Conduct & Workplace Safety": "Кодекс поведения и безопасность труда",
-    "New Employee Onboarding": "Знакомство с компанией",
-    "System Design Fundamentals": "Основы проектирования систем",
-    "Designing High-Load Systems": "Проектирование высоконагруженных систем",
-    "Architecture Review Circle": "Клуб разбора архитектуры",
-    "Business Writing & Documentation": "Деловая переписка и документация",
-    "Cloud Certification Prep": "Подготовка к сертификации по облачным технологиям",
-    "Kubernetes in Practice": "Kubernetes на практике",
-    "Secure Coding Workshop": "Практикум по безопасной разработке",
-    "Advanced Python": "Продвинутый Python",
-    "TypeScript in Depth": "Углублённый TypeScript",
-    "Web Performance Deep Dive": "Углублённая оптимизация сайтов",
-    "Web Performance Fundamentals": "Основы быстродействия сайтов",
-    "Accessible Interfaces": "Доступные интерфейсы",
-    "React Patterns & State Management": "Подходы к разработке на React и управление состоянием",
-    "Test Automation Bootcamp": "Интенсив по автоматизации тестирования",
-    "API & Performance Testing Workshop": "Практикум по API и нагрузочному тестированию",
-    "Applied Statistics for Analysts": "Прикладная статистика для аналитиков",
-    "A/B Testing Workshop": "Практикум по A/B-тестированию",
-    "SQL & BI for Analytics": "SQL и бизнес-аналитика",
-    "Data Storytelling & Visualization": "Как рассказывать истории с помощью данных",
-    "Machine Learning for Analysts": "Машинное обучение для аналитиков",
-    "Dimensional Data Modeling": "Многомерное моделирование данных",
-    "Product Discovery Lab": "Лаборатория исследования потребностей пользователей",
-    "Roadmapping & Agile Planning": "Планирование продукта и гибкие методы работы",
-    "Labor Law & Employee Relations": "Трудовое право и отношения с сотрудниками",
-    "People Analytics & Total Rewards": "HR-аналитика и система вознаграждений",
-    "Structured Interviewing": "Структурированные собеседования",
-    "Designing Learning Programs": "Разработка учебных программ",
-    "Negotiation Masterclass": "Мастер-класс по переговорам",
-    "Consultative Selling & Prospecting": "Консультативные продажи и поиск клиентов",
-    "Handling Difficult Conversations": "Как вести сложные разговоры",
-    "Technical Troubleshooting Academy": "Решение технических проблем",
-    "Public Speaking Club": "Клуб публичных выступлений",
-    "Mentor Track": "Программа наставничества",
-    "Leadership Foundations": "Основы лидерства",
-    "Time & Priority Management": "Управление временем и приоритетами",
-    "Structured Problem Solving": "Системный подход к решению проблем",
-}
-FACTOR_LABELS = {
-    "critical_gap": "Развивает навык, обязательный для карьерной цели.",
-    "required_gap": "Сокращает расстояние до нужного уровня навыков.",
-    "grade_fit": "Подходит вашему текущему профессиональному уровню.",
-    "target_alignment": "Подходит роли и уровню вашей карьерной цели.",
-    "goal_alignment": "Связан с указанной вами карьерной целью.",
-    "history_avoidance": "Похожие занятия вы ранее пропускали, отклоняли или не завершали — это снижает приоритет.",
-    "engagement": "Учтён ваш опыт завершения похожих занятий.",
-    "feedback": "Учтены ваши оценки похожих занятий.",
-    "availability": "Учтено, когда можно начать занятие.",
-    "duration": "Учтено время на занятие: длительные активности получают меньший приоритет.",
-}
-BADGE_LABELS = {
-    "first_step": ("🌱", "Первый шаг", "Завершена первая добровольная активность"),
-    "self_starter": ("🚀", "По своей инициативе", "Активность выбрана самостоятельно"),
-    "comeback": ("🔁", "Возвращение", "Вернулись к навыку, который раньше не получилось развить"),
-    "grown_since_review": ("📈", "Рост после оценки", "Навыки выросли после последней оценки"),
-    "critical_closed": ("🎯", "Ключевой навык", "Обязательный навык цели на нужном уровне"),
-    "halfway": ("⛰️", "Полпути", "Покрыта половина требований цели"),
-    "ready": ("🏆", "Готов к цели", "Все обязательные навыки цели на нужном уровне"),
-}
 MAX_QUEST_STEPS = 6
 STYLE = """
 <style>
@@ -230,6 +83,8 @@ h1, h2, h3 {letter-spacing: -0.01em; color: #10261E;}
 .cq-badge span {font-size: 20px;}
 .cq-rec-top {display: inline-block; background: #F5B83D; color: #3D2A00; font-size: 12px; font-weight: 600;
   border-radius: 999px; padding: 2px 10px; margin-bottom: 6px;}
+.cq-plus {display: inline-block; background: #0E7C5A; color: #FFFFFF; font-weight: 600; font-size: 13px;
+  border-radius: 999px; padding: 3px 10px; margin: 0 6px 6px 0;}
 .cq-rec-title {font-size: 21px; font-weight: 700; color: #10261E; margin-bottom: 6px;}
 .cq-chip {display: inline-block; background: #EEF5F1; color: #0B5D45; border-radius: 999px; padding: 3px 10px;
   font-size: 13px; margin: 0 6px 6px 0;}
@@ -513,6 +368,12 @@ def _complete(dataset: Dataset, employee: Employee, rec: Recommendation, viewer:
         if value != before.get(key, 0)
     ]
     message = "Прогресс обновлён. " + ("; ".join(changes) if changes else "Уровни навыков не изменились.")
+    old_quest = build_quest(dataset, employee.employee_id)
+    new_quest = build_quest(updated, employee.employee_id)
+    earned = [code for code in (new_quest.badges if new_quest else []) if not old_quest or code not in old_quest.badges]
+    if earned:
+        message += " 🏅 Новое достижение: " + ", ".join(BADGE_LABELS[code][1] for code in earned) + "."
+        st.session_state["celebrate"] = True
     _replace_dataset(updated, message)
 
 
@@ -530,12 +391,21 @@ def _completion_button(dataset: Dataset, employee: Employee, rec: Recommendation
 
 
 def _recommendation_card(
-    dataset: Dataset, employee: Employee, rec: Recommendation, viewer: Viewer, language: Language, *, top: bool = False
+    dataset: Dataset,
+    employee: Employee,
+    rec: Recommendation,
+    viewer: Viewer,
+    language: Language,
+    *,
+    quest: Quest | None,
+    top: bool = False,
 ) -> None:
     event = dataset.event(rec.event_id)
     with st.container(border=True):
         session = rec.next_session.strftime("%d.%m.%Y") if rec.next_session else "в любое время"
         chips = [FORMAT_LABELS[event.event_format], f"{event.duration_hours:g} ч", f"Старт: {session}"]
+        gain = coverage_gain(quest, rec.skill_changes) if quest else 0.0
+        progress = f'<span class="cq-plus">+{gain:.0%} к цели</span>' if gain > 0 else ""
         gains = "".join(
             f'<span class="cq-gain">{_hint(_skill_name(dataset, key), f"{dataset.skill(key).name} · {key}")}'
             f" {before} → <b>{after}</b></span>"
@@ -544,7 +414,7 @@ def _recommendation_card(
         title = _hint(EVENT_LABELS.get(event.title, event.title), f"{event.title} · {event.event_id}")
         badge = '<div class="cq-rec-top">Лучший следующий шаг</div>' if top else ""
         st.markdown(
-            f'{badge}<div class="cq-rec-title">{title}</div>'
+            f'{badge}<div class="cq-rec-title">{title}</div>{progress}'
             + "".join(f'<span class="cq-chip">{escape(chip)}</span>' for chip in chips)
             + f"<div>{gains}</div>",
             unsafe_allow_html=True,
@@ -558,7 +428,7 @@ def _recommendation_card(
             _completion_button(dataset, employee, rec, viewer)
 
 
-def _recommendations(dataset: Dataset, employee: Employee, viewer: Viewer) -> None:
+def _recommendations(dataset: Dataset, employee: Employee, viewer: Viewer, quest: Quest | None) -> None:
     st.subheader("Ваш следующий шаг")
     st.caption("Начните с первого варианта или посмотрите другие: участие добровольное.")
     language = cast(
@@ -573,11 +443,11 @@ def _recommendations(dataset: Dataset, employee: Employee, viewer: Viewer) -> No
     if not candidates:
         st.info("Подходящих шагов сейчас нет: цель может быть достигнута или в каталоге нет подходящих занятий.")
         return
-    _recommendation_card(dataset, employee, candidates[0], viewer, language, top=True)
+    _recommendation_card(dataset, employee, candidates[0], viewer, language, quest=quest, top=True)
     if len(candidates) > 1:
         with st.expander(f"Другие варианты · {len(candidates) - 1}"):
             for rec in candidates[1:]:
-                _recommendation_card(dataset, employee, rec, viewer, language)
+                _recommendation_card(dataset, employee, rec, viewer, language, quest=quest)
 
 
 def _history(dataset: Dataset, employee: Employee) -> None:
@@ -615,7 +485,7 @@ def _employee_view(dataset: Dataset, viewer: Viewer) -> None:
     quest = build_quest(dataset, employee.employee_id)
     _hero(employee, quest)
     _coach(dataset, employee, viewer)
-    _recommendations(dataset, employee, viewer)
+    _recommendations(dataset, employee, viewer, quest)
     _quest(dataset, quest)
     _trajectory(dataset, employee)
     _history(dataset, employee)
@@ -772,6 +642,8 @@ def main() -> None:
     notice = st.session_state.pop("notice", None)
     if notice:
         st.success(notice)
+    if st.session_state.pop("celebrate", False):
+        st.balloons()
     pages = ["Мой профиль"] if viewer.role == "employee" else ["Обзор HR", "Профиль сотрудника", "Данные"]
     page = st.sidebar.radio("Раздел", pages)
     if page == "Обзор HR":
