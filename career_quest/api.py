@@ -192,15 +192,32 @@ def logout(response: Response, cq_session: SessionCookie = None) -> dict[str, bo
 
 
 @app.get("/api/employees")
-def employees(response: Response, cq_session: SessionCookie = None) -> list[dict[str, str]]:
+def employees(response: Response, cq_session: SessionCookie = None) -> list[dict[str, str | None]]:
     """List profiles the viewer may open."""
     session = _session(response, cq_session)
     viewer = _viewer(session)
     return [
-        {"id": e.employee_id, "name": e.full_name, "role": _role_label(e.role, e.grade), "department": e.department}
+        {
+            "id": e.employee_id,
+            "name": e.full_name,
+            "role": _role_label(e.role, e.grade),
+            "department": e.department,
+            **_career_path(session.dataset, e),
+        }
         for e in session.dataset.employees
         if can_view_employee(viewer, e.employee_id)
     ]
+
+
+def _career_path(ds: Dataset, employee: Employee) -> dict[str, str | None]:
+    """Where the employee is now and where they are heading: own goal, next grade, or none (Lead, no goal)."""
+    target = target_profile(ds, employee.employee_id)
+    if target is None or (employee.career_goal is None and target.grade == employee.grade):
+        kind, label = "none", None
+    else:
+        kind = "goal" if employee.career_goal is not None else "next"
+        label = _role_label(target.role, target.grade)
+    return {"current": _role_label(employee.role, employee.grade), "target": label, "target_kind": kind}
 
 
 @app.get("/api/employees/{employee_id}")
@@ -213,7 +230,7 @@ def profile(employee_id: str, response: Response, cq_session: SessionCookie = No
     own = _viewer(session).role == "employee"
     return {
         "own": own,
-        "employee": _employee_payload(employee),
+        "employee": {**_employee_payload(employee), **_career_path(ds, employee)},
         "quest": _quest_payload(ds, quest),
         "recommendations": [
             _recommendation_payload(ds, employee, rec, quest, own=own) for rec in recommend(ds, employee_id)

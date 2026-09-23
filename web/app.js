@@ -168,6 +168,13 @@ function loginView() {
   </div></div>`;
 }
 
+// One wording everywhere: where the person is now and where they are heading.
+function pathLine(path, tag) {
+  if (path.target_kind === "none" || !path.target) return `<${tag} class="path-target">Цель не задана</${tag}>`;
+  const label = path.target_kind === "goal" ? "Хочет стать" : "Следующий уровень";
+  return `<${tag} class="path-target">→ ${label}: ${h(path.target)}</${tag}>`;
+}
+
 function sidebar(page, id) {
   const viewer = state.session.viewer;
   const hr = viewer.role === "hr";
@@ -183,11 +190,11 @@ function sidebar(page, id) {
   if (hr) nav.push(["#/data", "🗂️", "Данные", page === "data"]);
   const filter = state.filter.toLowerCase();
   const people = state.employees
-    .filter((e) => !filter || `${e.name} ${e.id} ${e.role}`.toLowerCase().includes(filter))
+    .filter((e) => !filter || `${e.name} ${e.id} ${e.role} ${e.target || ""}`.toLowerCase().includes(filter))
     .slice(0, 250)
     .map(
       (e) => `<button data-action="open" data-id="${h(e.id)}" class="${e.id === id ? "active" : ""}">
-        ${h(e.name)}<small>${h(e.role)}</small></button>`,
+        ${h(e.name)}<small>Сейчас: ${h(e.current)}</small>${pathLine(e, "small")}</button>`,
     )
     .join("");
   return `
@@ -216,7 +223,13 @@ function employeeView() {
   return `
     <div class="page-title"><div>
       <h1>${h(employee.name)}</h1>
-      <p>${h(employee.department)} · ${h(employee.role_label)} · стаж ${employee.tenure_months} мес.</p>
+      <p>${h(employee.department)} · стаж ${employee.tenure_months} мес.</p>
+      <div class="career-path">
+        <div><span>Сейчас</span><b>${h(employee.current)}</b></div>
+        <div class="arrow">→</div>
+        <div><span>${employee.target_kind === "goal" ? (own ? "Хочу стать" : "Хочет стать") : employee.target_kind === "next" ? "Следующий уровень" : "Цель"}</span>
+          <b>${employee.target ? h(employee.target) : "не задана"}</b></div>
+      </div>
     </div></div>
     ${heroView(employee, quest, own)}
     ${own ? "" : hrGoalNote(employee)}

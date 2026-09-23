@@ -284,3 +284,20 @@ def test_social_language_switch_preserves_thread_without_using_budget(
     assert session.ai_calls == 0
     assert len(session.dialogue) == 1
     assert len(next(iter(session.dialogue.values()))) == 6
+
+
+def test_employee_list_and_profile_show_current_role_and_target(client: TestClient) -> None:
+    login(client)
+
+    people = {e["id"]: e for e in client.get("/api/employees").json()}
+    profile = client.get("/api/employees/E0001").json()["employee"]
+
+    assert people["E0001"]["current"] == "Разработчик серверной части · Начинающий"
+    assert people["E0001"]["target_kind"] == "goal"
+    assert people["E0001"]["target"] == "Разработчик серверной части · Самостоятельный специалист"
+    assert (profile["current"], profile["target"], profile["target_kind"]) == (
+        people["E0001"]["current"],
+        people["E0001"]["target"],
+        "goal",
+    )
+    assert {e["target_kind"] for e in people.values()} <= {"goal", "next", "none"}
