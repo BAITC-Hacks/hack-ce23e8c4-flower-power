@@ -38,6 +38,11 @@ ROLE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Sales Manager": ("sales", "продаж", "сату"),
     "Customer Support Specialist": ("support", "поддерж", "клиент", "қолдау"),
 }
+KEYWORD_REASONS: dict[Language, str] = {
+    "ru": "Подобрано по ключевым словам в запросе «{wish}»",
+    "kk": "«{wish}» сұрауындағы кілт сөздер бойынша таңдалды",
+    "en": "Matched by keywords in “{wish}”",
+}
 GRADE_KEYWORDS: dict[Grade, tuple[str, ...]] = {
     "Lead": ("lead", "тимлид", "лид", "руковод", "ведущ", "басшы"),
     "Senior": ("senior", "сеньор", "синьор", "старш", "аға"),
@@ -62,7 +67,9 @@ class GoalSuggestion(BaseModel):
     source: Literal["ai", "keywords"]
 
 
-def suggest_goal(ds: Dataset, employee_id: str, wish: str, language: Language) -> GoalSuggestion | None:
+def suggest_goal(
+    ds: Dataset, employee_id: str, wish: str, language: Language, *, allow_ai: bool = True
+) -> GoalSuggestion | None:
     """Propose a catalog career goal for a free-text wish.
 
     Args:
@@ -70,6 +77,7 @@ def suggest_goal(ds: Dataset, employee_id: str, wish: str, language: Language) -
         employee_id: Employee identifier (only role and grade are used).
         wish: What the employee wrote, e.g. "хочу стать тимлидом в аналитике".
         language: Language of the reason sentence.
+        allow_ai: ``False`` skips the model and uses only the offline keyword matcher.
 
     Returns:
         The suggestion, or ``None`` if neither the model nor the keywords find a matching role.
@@ -77,7 +85,7 @@ def suggest_goal(ds: Dataset, employee_id: str, wish: str, language: Language) -
     wish = wish.strip()[:MAX_WISH_CHARS]
     if not wish:
         return None
-    if os.environ.get("OPENAI_API_KEY", "").strip():
+    if allow_ai and os.environ.get("OPENAI_API_KEY", "").strip():
         try:
             suggestion = _ai_goal(ds, employee_id, wish, language)
         except (OSError, ValueError, HTTPException, urllib.error.URLError, ValidationError, KeyError, TypeError) as exc:
@@ -85,7 +93,7 @@ def suggest_goal(ds: Dataset, employee_id: str, wish: str, language: Language) -
         else:
             log.info("coach_ai_goal", employee_id=employee_id, found=suggestion is not None)
             return suggestion
-    return _keyword_goal(ds, employee_id, wish)
+    return _keyword_goal(ds, employee_id, wish, language)
 
 
 def set_goal(ds: Dataset, employee_id: str, goal: CareerGoal) -> Dataset:
@@ -159,7 +167,7 @@ def _output_text(body: dict[str, Any]) -> str:
     return output_text(body)
 
 
-def _keyword_goal(ds: Dataset, employee_id: str, wish: str) -> GoalSuggestion | None:
+def _keyword_goal(ds: Dataset, employee_id: str, wish: str, language: Language) -> GoalSuggestion | None:
     employee = ds.employee(employee_id)
     text = wish.lower()
     words = set(re.findall(r"\w+", text))
@@ -178,7 +186,7 @@ def _keyword_goal(ds: Dataset, employee_id: str, wish: str) -> GoalSuggestion | 
     return GoalSuggestion(
         target_role=role,
         target_grade=grade,
-        reason=f"Found by keywords in: “{wish}”",
+        reason=KEYWORD_REASONS[language].format(wish=wish),
         source="keywords",
     )
 

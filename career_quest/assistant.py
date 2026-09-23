@@ -16,7 +16,7 @@ from career_quest.coach import GoalSuggestion, suggest_goal
 from career_quest.data import Dataset
 from career_quest.explain import llm_configured
 from career_quest.factor_text import russian_detail
-from career_quest.labels import EVENT_LABELS, SKILL_LABELS
+from career_quest.labels import EVENT_LABELS, GRADE_LABELS, ROLE_LABELS, SKILL_LABELS
 from career_quest.llm import AIUnavailableError, output_text, post
 from career_quest.models import Language
 from career_quest.scoring import Factor, effective_skills, recommend, target_profile
@@ -38,13 +38,39 @@ an unspecified direction. A goal is a proposal, not a change. Other actions must
 Unused ID arrays must be empty. Never invent IDs, numbers or facts. No free-text answer: the application
 will render your selected evidence, with original factors and accurate quantities.
 """
-STATUS = {
-    "missing_key": "AI не настроен в процессе сервера. Показан локальный ответ без LLM.",
-    "credentials": "AI не принял ключ. Показан локальный ответ; организатору нужно проверить настройку доступа.",
-    "access": "У сервера нет доступа к модели. Показан локальный ответ.",
-    "quota": "Достигнут лимит запросов или бюджета провайдера. Показан локальный ответ.",
-    "connection": "AI не ответил вовремя или недоступна сеть. Показан локальный ответ.",
-    "limit": "Лимит AI-запросов этой сессии исчерпан. Доступен локальный анализ.",
+STATUS: dict[Language, dict[str, str]] = {
+    "ru": {
+        "missing_key": "AI не настроен в процессе сервера. Показан локальный ответ без LLM.",
+        "credentials": "AI не принял ключ. Показан локальный ответ; организатору нужно проверить настройку доступа.",
+        "access": "У сервера нет доступа к модели. Показан локальный ответ.",
+        "quota": "Достигнут лимит запросов или бюджета провайдера. Показан локальный ответ.",
+        "connection": "AI не ответил вовремя или недоступна сеть. Показан локальный ответ.",
+        "limit": "Лимит AI-запросов этой сессии исчерпан. Доступен локальный анализ.",
+        "other": "AI вернул неполный или непроверяемый ответ. Показан локальный ответ.",
+    },
+    "kk": {
+        "missing_key": "Серверде AI бапталмаған. LLM-сіз жергілікті жауап көрсетілді.",
+        "credentials": "AI кілтті қабылдамады. Жергілікті жауап көрсетілді.",
+        "access": "Сервердің модельге қолжетімділігі жоқ. Жергілікті жауап көрсетілді.",
+        "quota": "Провайдердің сұрау немесе бюджет шегіне жетті. Жергілікті жауап көрсетілді.",
+        "connection": "AI уақытында жауап бермеді немесе желі қолжетімсіз. Жергілікті жауап көрсетілді.",
+        "limit": "Осы сессияның AI сұрау шегі таусылды. Жергілікті талдау қолжетімді.",
+        "other": "AI толық емес немесе тексерілмейтін жауап қайтарды. Жергілікті жауап көрсетілді.",
+    },
+    "en": {
+        "missing_key": "AI is not configured on the server. Showing a local answer without an LLM.",
+        "credentials": "AI rejected the key. Showing a local answer.",
+        "access": "The server has no access to the model. Showing a local answer.",
+        "quota": "The provider's rate or budget limit was reached. Showing a local answer.",
+        "connection": "AI timed out or the network is unavailable. Showing a local answer.",
+        "limit": "This session's AI request limit is used up. Local analysis is available.",
+        "other": "AI returned an incomplete or unverifiable answer. Showing a local answer.",
+    },
+}
+GOAL_TEXT: dict[Language, tuple[str, str]] = {
+    "ru": ("Предлагаемая цель", "Предложение из каталога по вашему запросу; применится только после подтверждения."),
+    "kk": ("Ұсынылатын мақсат", "Сұрауыңыз бойынша каталогтан ұсыныс; тек растағаннан кейін қолданылады."),
+    "en": ("Suggested goal", "Proposed from the catalog for your request; applied only after you confirm."),
 }
 
 
@@ -160,9 +186,7 @@ def _decision(evidence: dict[str, Any], wish: str, history: list[dict[str, str]]
     return decision
 
 
-def _local(
-    ds: Dataset, employee_id: str, wish: str, evidence: dict[str, Any]
-) -> tuple[Decision, GoalSuggestion | None]:
+def _local(wish: str, evidence: dict[str, Any]) -> Decision:
     text = wish.casefold()
     intent: Intent = "clarify"
     if any(word in text for word in ("навык", "не хватает", "skill", "дағды")):
@@ -171,17 +195,18 @@ def _local(
         intent = "explain"
     elif any(word in text for word in ("альтернатив", "другой", "другое", "alternative", "басқа")):
         intent = "alternatives"
-    suggestion = None
-    if intent == "clarify" and not llm_configured():
-        suggestion = suggest_goal(ds, employee_id, wish, "ru")
-        if suggestion:
-            intent = "goal"
     return Decision(
         intent=intent,
         skill_ids=[g["skill_id"] for g in evidence["gaps"][:3]],
         event_ids=[r["event_id"] for r in evidence["recommendations"]],
         goal_key="",
-    ), suggestion
+    )
+
+
+def _goal_label(role: str, grade: str, language: Language) -> str:
+    if language == "ru":
+        return f"{ROLE_LABELS.get(role, role)} · {GRADE_LABELS.get(grade, grade)}"
+    return f"{role} · {grade}"
 
 
 def _factor_line(ds: Dataset, raw: dict[str, Any], language: Language) -> str:
@@ -251,7 +276,8 @@ def answer(
     """Respond using validated LLM selections or an explicitly limited offline mode."""
     evidence = context(ds, employee_id)
     wish = wish.strip()[:500]
-    decision, suggestion = _local(ds, employee_id, wish, evidence)
+    decision = _local(wish, evidence)
+    suggestion = None
     status = "missing_key" if not llm_configured() else "limit"
     source: Literal["ai", "local"] = "local"
     if wish and llm_configured() and allow_ai:
@@ -264,20 +290,20 @@ def answer(
     if decision.intent == "goal" and source == "ai":
         role, grade = decision.goal_key.split("|")
         suggestion = GoalSuggestion.model_validate(
-            {
-                "target_role": role,
-                "target_grade": grade,
-                "source": "ai",
-                "reason": "Предложение из каталога по вашему запросу; применится только после подтверждения.",
-            }
+            {"target_role": role, "target_grade": grade, "source": "ai", "reason": GOAL_TEXT[language][1]}
         )
+    if source == "local" and decision.intent == "clarify":
+        # Without the model (no key, limit, quota, network) an explicit wish still gets an offline goal.
+        suggestion = suggest_goal(ds, employee_id, wish, language, allow_ai=False)
+        if suggestion:
+            decision = decision.model_copy(update={"intent": "goal"})
     text = (
         _render(ds, decision, evidence, language)
         if suggestion is None
-        else (f"Предлагаемая цель: {suggestion.target_role} · {suggestion.target_grade}.\n{suggestion.reason}")
+        else f"{GOAL_TEXT[language][0]}: {_goal_label(suggestion.target_role, suggestion.target_grade, language)}."
+        f"\n{suggestion.reason}"
     )
     if source == "local":
-        text = (
-            STATUS.get(status, "AI вернул неполный или непроверяемый ответ. Показан локальный ответ.") + "\n\n" + text
-        )
+        statuses = STATUS[language]
+        text = statuses.get(status, statuses["other"]) + "\n\n" + text
     return Reply(text=text, source=source, status=status, intent=decision.intent, suggestion=suggestion)

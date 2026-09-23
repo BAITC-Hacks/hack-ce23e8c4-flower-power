@@ -128,7 +128,12 @@ async function render() {
     let content = "";
     if (page === "employee" && id) {
       if (state.profileId !== id || !state.profile) {
-        state.suggestion = undefined;
+        if (state.profileId !== id) {
+          // The dialogue belongs to one profile: never show it on another person's page.
+          state.dialogue = [];
+          state.wish = "";
+          state.suggestion = undefined;
+        }
         await loadProfile(id);
       }
       content = employeeView();
@@ -511,6 +516,7 @@ const actions = {
         json: { event_id: el.dataset.event },
       });
       await loadProfile(state.profileId);
+      state.dialogue = []; // the server starts a fresh dialogue after progress changes
       state.hr = null;
       const changes = result.changes.map((c) => `${c.name}: ${c.before} → ${c.after}`).join("; ");
       let message = `Прогресс обновлён. ${changes || "Уровни навыков не изменились."}`;
@@ -528,6 +534,7 @@ const actions = {
       });
       await loadProfile(state.profileId);
       state.suggestion = undefined;
+      state.dialogue = []; // the server starts a fresh dialogue after the goal changes
       state.hr = null;
       toast(`Цель обновлена: ${s.label}. Шаги пересчитаны.`);
     }),
