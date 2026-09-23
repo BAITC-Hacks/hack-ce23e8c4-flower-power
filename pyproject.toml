@@ -1,0 +1,58 @@
+[project]
+name = "career-quest"
+version = "0.1.0"
+description = "Career Quest: AI-навигатор развития сотрудника (HackAlem AI, трек Halyk Bank)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.8",
+    "structlog>=24.1",
+    "streamlit>=1.38",
+    "pandas>=2.2",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pandas-stubs>=2.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["career_quest"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "I", "N", "UP", "B", "A", "SIM", "S", "C4", "PT",
+    "RET", "ARG", "PTH", "ICN", "PERF", "C901", "RUF", "D",
+]
+ignore = ["RUF001", "RUF002", "RUF003", "S324"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["career_quest"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
