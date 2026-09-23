@@ -1,0 +1,21 @@
+# Start: docker compose up --build
+# Open: http://localhost:8501
+# Optional: copy .env.example to .env and set credentials before starting.
+services:
+  career-quest:
+    build: .
+    ports:
+      - "127.0.0.1:${CQ_PORT:-8501}:8501"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      CQ_EMPLOYEE_ID: ${CQ_EMPLOYEE_ID:-}
+      CQ_EMPLOYEE_PASSWORD: ${CQ_EMPLOYEE_PASSWORD:-}
+      CQ_HR_PASSWORD: ${CQ_HR_PASSWORD:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
