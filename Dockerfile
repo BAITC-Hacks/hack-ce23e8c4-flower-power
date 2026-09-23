@@ -14,11 +14,12 @@ COPY pyproject.toml uv.lock README.md ./
 COPY career_quest ./career_quest
 RUN uv sync --locked --no-dev
 COPY app.py ./
+COPY web ./web
 COPY data/employees.json data/events.json data/skills.json data/activity_history.csv ./data/
 RUN groupadd --system careerquest && useradd --system --gid careerquest --home-dir /app careerquest
 USER careerquest
 
 EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=2)"]
-CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/api/health', timeout=2)"]
+CMD ["uvicorn", "career_quest.api:app", "--host", "0.0.0.0", "--port", "8501", "--proxy-headers"]
