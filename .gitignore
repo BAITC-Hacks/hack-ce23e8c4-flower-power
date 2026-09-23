@@ -13,3 +13,8 @@ dist/
 !.env.example
 data/local/
 .DS_Store
+
+# Editors
+.zed/
+.vscode/
+.idea/
