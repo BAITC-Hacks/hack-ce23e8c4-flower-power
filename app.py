@@ -34,7 +34,7 @@ from career_quest.labels import (
     STATUS_LABELS,
 )
 from career_quest.models import CareerGoal, Employee, Language
-from career_quest.quest import BADGES, Quest, build_quest
+from career_quest.quest import BADGES, Quest, build_quest, coverage_gain
 from career_quest.scoring import Recommendation, complete_activity, effective_skills, recommend, target_profile
 from career_quest.snapshot import FILENAMES, export_snapshot, import_additions, import_snapshot
 
@@ -83,6 +83,8 @@ h1, h2, h3 {letter-spacing: -0.01em; color: #10261E;}
 .cq-badge span {font-size: 20px;}
 .cq-rec-top {display: inline-block; background: #F5B83D; color: #3D2A00; font-size: 12px; font-weight: 600;
   border-radius: 999px; padding: 2px 10px; margin-bottom: 6px;}
+.cq-plus {display: inline-block; background: #0E7C5A; color: #FFFFFF; font-weight: 600; font-size: 13px;
+  border-radius: 999px; padding: 3px 10px; margin: 0 6px 6px 0;}
 .cq-rec-title {font-size: 21px; font-weight: 700; color: #10261E; margin-bottom: 6px;}
 .cq-chip {display: inline-block; background: #EEF5F1; color: #0B5D45; border-radius: 999px; padding: 3px 10px;
   font-size: 13px; margin: 0 6px 6px 0;}
@@ -366,6 +368,12 @@ def _complete(dataset: Dataset, employee: Employee, rec: Recommendation, viewer:
         if value != before.get(key, 0)
     ]
     message = "Прогресс обновлён. " + ("; ".join(changes) if changes else "Уровни навыков не изменились.")
+    old_quest = build_quest(dataset, employee.employee_id)
+    new_quest = build_quest(updated, employee.employee_id)
+    earned = [code for code in (new_quest.badges if new_quest else []) if not old_quest or code not in old_quest.badges]
+    if earned:
+        message += " 🏅 Новое достижение: " + ", ".join(BADGE_LABELS[code][1] for code in earned) + "."
+        st.session_state["celebrate"] = True
     _replace_dataset(updated, message)
 
 
@@ -383,12 +391,21 @@ def _completion_button(dataset: Dataset, employee: Employee, rec: Recommendation
 
 
 def _recommendation_card(
-    dataset: Dataset, employee: Employee, rec: Recommendation, viewer: Viewer, language: Language, *, top: bool = False
+    dataset: Dataset,
+    employee: Employee,
+    rec: Recommendation,
+    viewer: Viewer,
+    language: Language,
+    *,
+    quest: Quest | None,
+    top: bool = False,
 ) -> None:
     event = dataset.event(rec.event_id)
     with st.container(border=True):
         session = rec.next_session.strftime("%d.%m.%Y") if rec.next_session else "в любое время"
         chips = [FORMAT_LABELS[event.event_format], f"{event.duration_hours:g} ч", f"Старт: {session}"]
+        gain = coverage_gain(quest, rec.skill_changes) if quest else 0.0
+        progress = f'<span class="cq-plus">+{gain:.0%} к цели</span>' if gain > 0 else ""
         gains = "".join(
             f'<span class="cq-gain">{_hint(_skill_name(dataset, key), f"{dataset.skill(key).name} · {key}")}'
             f" {before} → <b>{after}</b></span>"
@@ -397,7 +414,7 @@ def _recommendation_card(
         title = _hint(EVENT_LABELS.get(event.title, event.title), f"{event.title} · {event.event_id}")
         badge = '<div class="cq-rec-top">Лучший следующий шаг</div>' if top else ""
         st.markdown(
-            f'{badge}<div class="cq-rec-title">{title}</div>'
+            f'{badge}<div class="cq-rec-title">{title}</div>{progress}'
             + "".join(f'<span class="cq-chip">{escape(chip)}</span>' for chip in chips)
             + f"<div>{gains}</div>",
             unsafe_allow_html=True,
@@ -411,7 +428,7 @@ def _recommendation_card(
             _completion_button(dataset, employee, rec, viewer)
 
 
-def _recommendations(dataset: Dataset, employee: Employee, viewer: Viewer) -> None:
+def _recommendations(dataset: Dataset, employee: Employee, viewer: Viewer, quest: Quest | None) -> None:
     st.subheader("Ваш следующий шаг")
     st.caption("Начните с первого варианта или посмотрите другие: участие добровольное.")
     language = cast(
@@ -426,11 +443,11 @@ def _recommendations(dataset: Dataset, employee: Employee, viewer: Viewer) -> No
     if not candidates:
         st.info("Подходящих шагов сейчас нет: цель может быть достигнута или в каталоге нет подходящих занятий.")
         return
-    _recommendation_card(dataset, employee, candidates[0], viewer, language, top=True)
+    _recommendation_card(dataset, employee, candidates[0], viewer, language, quest=quest, top=True)
     if len(candidates) > 1:
         with st.expander(f"Другие варианты · {len(candidates) - 1}"):
             for rec in candidates[1:]:
-                _recommendation_card(dataset, employee, rec, viewer, language)
+                _recommendation_card(dataset, employee, rec, viewer, language, quest=quest)
 
 
 def _history(dataset: Dataset, employee: Employee) -> None:
@@ -468,7 +485,7 @@ def _employee_view(dataset: Dataset, viewer: Viewer) -> None:
     quest = build_quest(dataset, employee.employee_id)
     _hero(employee, quest)
     _coach(dataset, employee, viewer)
-    _recommendations(dataset, employee, viewer)
+    _recommendations(dataset, employee, viewer, quest)
     _quest(dataset, quest)
     _trajectory(dataset, employee)
     _history(dataset, employee)
@@ -625,6 +642,8 @@ def main() -> None:
     notice = st.session_state.pop("notice", None)
     if notice:
         st.success(notice)
+    if st.session_state.pop("celebrate", False):
+        st.balloons()
     pages = ["Мой профиль"] if viewer.role == "employee" else ["Обзор HR", "Профиль сотрудника", "Данные"]
     page = st.sidebar.radio("Раздел", pages)
     if page == "Обзор HR":
