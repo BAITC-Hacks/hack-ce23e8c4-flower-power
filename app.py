@@ -141,15 +141,18 @@ def _explanation(rec: Recommendation, employee: Employee, language: Language) ->
     identity = f"{employee.employee_id}:{employee.role}:{employee.grade}:{language}:{rec.model_dump_json()}"
     key = hashlib.sha256(identity.encode()).hexdigest()
     explanations = cast(dict[str, str], st.session_state.setdefault("explanations", {}))
-    if llm_configured() and st.button("Упорядочить аргументы с AI", key=f"ai_{key}"):
-        with st.spinner("AI выбирает порядок аргументов…"):
+    if llm_configured() and st.button("Объяснить с AI", key=f"ai_{key}"):
+        with st.spinner("AI объясняет рекомендацию…"):
             explanations[key] = explain(rec, employee, language)
     text = explanations.get(key, deterministic_explanation(rec, employee, language))
     st.text(text)
     with st.expander("Факторы и вклад в оценку"):
         st.dataframe(
             pd.DataFrame(
-                [{"Фактор": factor.code, "Вклад": factor.weight, "Факт": factor.detail} for factor in rec.factors]
+                [
+                    {"№": index + 1, "Фактор": factor.code, "Вклад": factor.weight, "Факт": factor.detail}
+                    for index, factor in enumerate(rec.factors)
+                ]
             ),
             hide_index=True,
             width="stretch",
@@ -177,12 +180,28 @@ def _complete(dataset: Dataset, employee: Employee, rec: Recommendation, viewer:
     _replace_dataset(updated, message)
 
 
+def _completion_button(dataset: Dataset, employee: Employee, rec: Recommendation, viewer: Viewer) -> None:
+    recorded_today = any(
+        record.event_id == rec.event_id and record.status == "completed" and record.session_date == dataset.as_of_date
+        for record in dataset.history_for(employee.employee_id)
+    )
+    if st.button(
+        "Смоделировать завершение", key=f"complete_{employee.employee_id}_{rec.event_id}", disabled=recorded_today
+    ):
+        _complete(dataset, employee, rec, viewer)
+    if recorded_today:
+        st.caption("Завершение этой активности уже записано на дату текущего среза.")
+
+
 def _recommendations(dataset: Dataset, employee: Employee, viewer: Viewer) -> None:
     st.subheader("Следующие шаги")
-    language = cast(Language, st.selectbox("Язык заголовков объяснения", ["ru", "kk", "en"]))
+    language = cast(Language, st.selectbox("Язык AI-объяснения", ["ru", "kk", "en"]))
     st.caption(
-        "Факты показаны на языке датасета. Подбор активностей выполняет расчётный модуль; LLM упорядочивает объяснение."
+        "Подбор учитывает карьерную цель и историю. AI объясняет факторы на выбранном языке; "
+        "исходные факты доступны ниже."
     )
+    if not llm_configured():
+        st.info("Сейчас показаны расчётные объяснения. Для AI настройте OpenAI — инструкция в боковой панели.")
     candidates = recommend(dataset, employee.employee_id)
     if not candidates:
         st.info(
@@ -203,8 +222,7 @@ def _recommendations(dataset: Dataset, employee: Employee, viewer: Viewer) -> No
                 )
             )
             _explanation(rec, employee, language)
-            if st.button("Смоделировать завершение", key=f"complete_{employee.employee_id}_{rec.event_id}"):
-                _complete(dataset, employee, rec, viewer)
+            _completion_button(dataset, employee, rec, viewer)
     st.caption("Завершение моделируется в текущей сессии приложения, без подтверждения из учебной системы.")
 
 
@@ -366,6 +384,12 @@ def main() -> None:
         return
     dataset = _dataset()
     st.sidebar.caption(f"Дата среза: {dataset.as_of_date:%d.%m.%Y}")
+    with st.sidebar.expander("Настройка AI"):
+        st.write("Задайте OPENAI_API_KEY в окружении перед запуском. Не добавляйте ключ в Git.")
+        st.code("uv run streamlit run app.py", language="bash")
+        st.caption("Модель по умолчанию: gpt-4.1-mini. Изменить: OPENAI_MODEL.")
+        st.caption("В OpenAI уходят только факторы рекомендации, без имени и полной истории сотрудника.")
+        st.caption("При ошибке модели показываем исходные расчётные факторы.")
     notice = st.session_state.pop("notice", None)
     if notice:
         st.success(notice)
