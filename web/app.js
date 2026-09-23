@@ -294,7 +294,7 @@ function coachView() {
       <b>Карьерный помощник: разберём ваш следующий шаг</b>
       <div class="small muted">Спросите о навыках, причинах рекомендации, альтернативах или новой цели — на русском, қазақша или English.
       AI получает ваш вопрос, последние сообщения и расчётные факты профиля, без имени. Цель меняется только после подтверждения.</div>
-      <div aria-live="polite">${state.dialogue.map(m => `<div class="explain"><b>${m.role === "user" ? "Вы" : "Помощник"}</b><br>${h(m.text)}</div>`).join("")}</div>
+      <div aria-live="polite">${state.dialogue.map(m => `<div class="explain"><b>${m.role === "user" ? "Вы" : "Помощник"}</b><br>${h(m.text)}${m.details ? `<details><summary>Цифры и расчёт</summary>${h(m.details)}</details>` : ""}</div>`).join("")}</div>
       <form data-action="coach">
         <input class="input" name="wish" data-action="wish" value="${h(state.wish)}" maxlength="500" placeholder="Каких навыков мне не хватает? Почему выбран этот курс?" required>
         <button class="btn btn-primary" type="submit">${state.busy === "coach" ? spinner : "Спросить"}</button>
@@ -557,7 +557,7 @@ const forms = {
     return withBusy("coach", async () => {
       const result = await api(`/api/employees/${encodeURIComponent(employeeId)}/assistant`, { json: { wish, language } });
       if (state.profileId !== employeeId) return;
-      state.dialogue.push({ role: "user", text: wish }, { role: "assistant", text: result.text });
+      state.dialogue.push({ role: "user", text: wish }, { role: "assistant", text: result.text, details: result.details });
       state.dialogue = state.dialogue.slice(-6);
       state.wish = "";
       state.suggestion = result.suggestion || undefined;

@@ -289,6 +289,7 @@ def _ask_assistant(dataset: Dataset, employee: Employee, wish: str, language: La
     cache_key = f"{key}:{wish.strip()}"
     if history and history[-1].get("request") == cache_key:
         return replies[cache_key]
+    previous = replies.get(history[-1].get("request", "")) if history else None
     count = int(st.session_state.get("assistant_calls", 0))
     reply = answer(
         dataset,
@@ -297,8 +298,11 @@ def _ask_assistant(dataset: Dataset, employee: Employee, wish: str, language: La
         language,
         [{"role": row["role"], "text": row["text"]} for row in history[-6:]],
         allow_ai=count < 40,
+        pending_goal=previous.suggestion if previous else None,
     )
-    st.session_state["assistant_calls"] = count + int(llm_configured() and count < 40)
+    st.session_state["assistant_calls"] = count + int(
+        llm_configured() and count < 40 and not (reply.status == "preview" and reply.source == "local")
+    )
     history.extend(
         [{"role": "user", "text": wish}, {"role": "assistant", "text": reply.text[:1800], "request": cache_key}]
     )
@@ -326,6 +330,9 @@ def _coach(dataset: Dataset, employee: Employee, viewer: Viewer) -> None:
         if reply is None:
             return
         st.text(reply.text)
+        if reply.details:
+            with st.expander("Цифры и расчёт"):
+                st.text(reply.details)
         st.caption("Разбор с LLM по проверенным данным" if reply.source == "ai" else "Локальный ответ без LLM")
         suggestion = reply.suggestion
         if suggestion and st.button("Сделать целью и пересчитать шаги", key=f"set_goal_{employee.employee_id}"):
