@@ -7,7 +7,7 @@ const state = {
   profile: null,
   profileId: null,
   hr: null,
-  lang: "ru",
+  lang: "auto",
   chats: {},
   loginRole: "employee",
   busy: "",
@@ -224,7 +224,7 @@ function employeeView() {
       <h2 style="margin:0">${own ? "Ваш следующий шаг" : "Рекомендованные шаги сотрудника"}</h2>
       <label class="row small muted">Язык ответа AI
         <select class="input" style="width:auto;padding:6px 10px" data-action="lang">
-          ${[["ru", "Русский"], ["kk", "Қазақша"], ["en", "English"]]
+          ${[["auto", "Авто — по сообщению"], ["ru", "Русский"], ["kk", "Қазақша"], ["en", "English"]]
             .map(([code, label]) => `<option value="${code}" ${state.lang === code ? "selected" : ""}>${label}</option>`)
             .join("")}
         </select></label>

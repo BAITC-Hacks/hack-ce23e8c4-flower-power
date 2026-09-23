@@ -55,7 +55,7 @@ def test_followup_and_mixed_language_are_sent_with_scoped_evidence(
     assert reply.source == "ai"
     assert event in reply.details
     assert payload["store"] is False
-    assert payload["max_output_tokens"] == 300
+    assert payload["max_output_tokens"] == 700
 
 
 @pytest.mark.parametrize("intent", ["clarify", "out_of_scope"])
@@ -193,3 +193,80 @@ def test_russian_plan_shows_level_growth_and_local_date(ds: Dataset) -> None:
     assert reply.intent == "goal"
     assert "Лидерство: 1 → 2 (" in reply.text
     assert "старт 08.10.2026" in reply.text
+
+
+@pytest.mark.parametrize(
+    ("message", "language", "prefix"),
+    [
+        ("Hi!", "en", "Hi!"),
+        ("привет", "ru", "Привет!"),
+        ("сәлем", "kk", "Сәлем!"),
+        ("thanks", "en", "You're welcome"),
+        ("қазақша", "kk", "Жақсы"),
+        ("ответь по-казахски", "kk", "Жақсы"),
+    ],
+)
+def test_social_messages_are_free_and_match_language(
+    ds: Dataset, monkeypatch: pytest.MonkeyPatch, message: str, language: str, prefix: str
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    network = MagicMock(side_effect=AssertionError("Social turns must not spend API budget"))
+    monkeypatch.setattr(assistant, "post", network)
+    reply = assistant.answer(ds, "E0001", message, auto_language=True)
+    assert reply.text.startswith(prefix)
+    assert reply.language == language
+    assert reply.status == "social"
+    assert reply.details == ""
+    network.assert_not_called()
+
+
+def test_greeting_with_question_uses_grounded_model_response(ds: Dataset, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    event = assistant.context(ds, "E0001")["recommendations"][0]["event_id"]
+    prose = "Hi! This activity helps you develop skills needed for your career goal."
+    network = MagicMock(
+        return_value=envelope(
+            {
+                "intent": "explain",
+                "skill_ids": [],
+                "event_ids": [event],
+                "goal_key": "",
+                "response": prose,
+                "response_language": "en",
+            }
+        )
+    )
+    monkeypatch.setattr(assistant, "post", network)
+    reply = assistant.answer(ds, "E0001", "Hi, why this course?", event_id=event, auto_language=True)
+    assert reply.text == prose
+    assert reply.language == "en"
+    assert event in reply.details
+    schema = network.call_args.args[0]["text"]["format"]["schema"]
+    assert set(schema["required"]) == set(schema["properties"])
+    assert all("default" not in item for item in schema["properties"].values())
+    network.assert_called_once()
+
+
+@pytest.mark.parametrize("prose", ["You need 99999 hours.", "Take EV_INVENTED next."])
+def test_unverifiable_prose_uses_visible_fallback(ds: Dataset, monkeypatch: pytest.MonkeyPatch, prose: str) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    event = assistant.context(ds, "E0001")["recommendations"][0]["event_id"]
+    monkeypatch.setattr(
+        assistant,
+        "post",
+        MagicMock(
+            return_value=envelope(
+                {
+                    "intent": "explain",
+                    "skill_ids": [],
+                    "event_ids": [event],
+                    "goal_key": "",
+                    "response": prose,
+                    "response_language": "en",
+                }
+            )
+        ),
+    )
+    reply = assistant.answer(ds, "E0001", "Why this activity?", event_id=event, auto_language=True)
+    assert reply.source == "local"
+    assert prose not in reply.text
