@@ -68,6 +68,22 @@ function confetti() {
 
 const spinner = '<span class="spinner"></span>';
 
+// One scale everywhere: the icon shows the absolute level, never whether the goal is met.
+const LEVEL_ICONS = [
+  [4, "🌸", "высокий уровень (4–5)"],
+  [2, "🌿", "средний уровень (2–3)"],
+  [0, "🌱", "начальный уровень (0–1)"],
+];
+const levelIcon = (level) => LEVEL_ICONS.find(([min]) => level >= min)[1];
+const STATUS_ICONS = {
+  completed: "✓",
+  in_progress: "⏳",
+  overdue: "⚠",
+  dropped: "✕",
+  no_show: "✕",
+  declined: "✕",
+};
+
 // ---------- data loading ----------
 async function loadSession() {
   state.session = await api("/api/session");
@@ -192,17 +208,17 @@ function sidebar(page, id) {
 }
 
 function employeeView() {
-  const { employee, quest, recommendations } = state.profile;
+  const { employee, quest, recommendations, own } = state.profile;
   const [top, ...rest] = recommendations;
   return `
     <div class="page-title"><div>
       <h1>${h(employee.name)}</h1>
       <p>${h(employee.department)} · ${h(employee.role_label)} · стаж ${employee.tenure_months} мес.</p>
     </div></div>
-    ${heroView(employee, quest)}
-    ${coachView()}
+    ${heroView(employee, quest, own)}
+    ${own ? coachView() : hrGoalNote(employee)}
     <div class="row" style="justify-content:space-between;margin-top:34px">
-      <h2 style="margin:0">Ваш следующий шаг</h2>
+      <h2 style="margin:0">${own ? "Ваш следующий шаг" : "Рекомендованные шаги сотрудника"}</h2>
       <label class="row small muted">Язык AI-объяснения
         <select class="input" style="width:auto;padding:6px 10px" data-action="lang">
           ${[["ru", "Русский"], ["kk", "Қазақша"], ["en", "English"]]
@@ -210,33 +226,39 @@ function employeeView() {
             .join("")}
         </select></label>
     </div>
-    <p class="muted small">Участие добровольное. Начните с первого варианта или выберите другой.</p>
+    <p class="muted small">${own ? "Участие добровольное. Начните с первого варианта или выберите другой." : "Участие добровольное: решение о прохождении принимает сотрудник."}</p>
     ${
       top
         ? `<div class="grid">${recommendationView(top, true)}</div>
            ${rest.length ? `<div class="grid grid-2" style="margin-top:14px">${rest.map((rec) => recommendationView(rec, false)).join("")}</div>` : ""}`
         : '<div class="card empty">Подходящих шагов сейчас нет: цель может быть достигнута или в каталоге нет доступных занятий.</div>'
     }
-    ${questView(quest)}
+    ${questView(quest, own)}
     ${skillsView()}
     ${historyView()}`;
 }
 
-function heroView(employee, quest) {
-  if (!quest) return '<div class="card">Карьерная цель не определена. Задайте её с помощью AI-коуча ниже.</div>';
+function hrGoalNote(employee) {
+  return `<section class="card coach"><div class="coach-avatar">🎯</div><div><b>Карьерная цель</b>
+    <div class="small muted">${employee.goal ? `Сотрудник указал цель: ${h(employee.goal)}.` : "Сотрудник не указывал цель — ориентир: следующий уровень в текущей роли."}
+    Цель выбирает сам сотрудник в своём профиле (AI-коуч доступен только ему).</div></div></section>`;
+}
+
+function heroView(employee, quest, own) {
+  if (!quest) return '<div class="card">Карьерная цель не определена.</div>';
   const percent = Math.round(quest.coverage * 100);
   const earned = quest.badges.filter((b) => b.earned).length;
   return `
   <section class="hero">
     <div class="ring" style="--p:${percent}"><div class="ring-inner"><div><b>${percent}%</b><span>к цели</span></div></div></div>
     <div>
-      <div class="hero-kicker">${h(employee.role_label)} → ${employee.goal ? "ваша карьерная цель" : "следующий уровень"}</div>
+      <div class="hero-kicker">${h(employee.role_label)} → ${employee.goal ? (own ? "ваша карьерная цель" : "карьерная цель сотрудника") : "следующий уровень"}</div>
       <div class="hero-goal">${h(quest.target)}</div>
       <div class="hero-note">Покрытие требуемых уровней навыков — не вероятность и не гарантия повышения.</div>
       <div class="stats">
-        <div class="stat"><b>${quest.critical_left}</b>${plural(quest.critical_left, "обязательный навык", "обязательных навыка", "обязательных навыков")} осталось</div>
-        <div class="stat"><b>+${quest.growth_points}</b>уровней роста после оценки</div>
-        <div class="stat"><b>${earned} из ${quest.badges_total}</b>личных достижений</div>
+        <div class="stat"><b>${quest.critical_left}</b>Обязательные навыки ниже цели</div>
+        <div class="stat"><b>+${quest.growth_points}</b>Рост уровней после оценки</div>
+        <div class="stat"><b>${earned} из ${quest.badges_total}</b>Личные достижения</div>
       </div>
     </div>
   </section>`;
@@ -276,7 +298,7 @@ function recommendationView(rec, top) {
   const factors = rec.factors
     .map(
       (f) => `<li><span class="sign ${f.weight < 0 ? "minus" : "plus"}">${f.weight < 0 ? "−" : "+"}</span>
-        <div>${h(f.label)}<small>${h(f.detail)}</small></div></li>`,
+        <div>${h(f.label)}<small title="${h(f.detail)}">${h(f.detail_ru)}</small></div></li>`,
     )
     .join("");
   const busyExplain = state.busy === `explain:${rec.event_id}`;
@@ -306,7 +328,7 @@ function recommendationView(rec, top) {
   </article>`;
 }
 
-function questView(quest) {
+function questView(quest, own) {
   if (!quest) return "";
   const steps = quest.milestones
     .slice(0, 8)
@@ -321,7 +343,8 @@ function questView(quest) {
     .join("");
   const more = quest.milestones.length - 8;
   return `
-    <h2>Ваш квест к цели</h2>
+    <h2>${own ? "Ваш квест к цели" : "Квест к цели"}</h2>
+    <p class="small muted">Навыки, которые ещё ниже уровня цели. Золотая полоса слева — навык обязателен для цели.</p>
     ${steps ? `<div class="grid grid-3">${steps}</div>` : '<div class="card">Все требования цели выполнены 🎉</div>'}
     ${more > 0 ? `<p class="small muted">И ещё ${more} — полный список в разделе «Навыки».</p>` : ""}
     <h2>Достижения</h2>
@@ -337,12 +360,16 @@ function skillsView() {
         .map((n) => `<span class="dot${n <= s.current ? " on" : ""}${s.required === n ? " target" : ""}"></span>`)
         .join("");
       const met = s.required !== null && s.current >= s.required;
-      return `<div class="card skill"><div><b title="${h(s.original)}">${met ? "🌸" : s.current >= 2 ? "🌿" : "🌱"} ${h(s.name)}</b>
-        <div class="small muted">${h(levels[s.current])}${s.required !== null ? ` · цель ${s.required}` : ""}${s.critical ? " · обязателен" : ""}</div></div>
+      const goal = s.required === null ? "" : met ? ' · <span class="ok">✓ цель достигнута</span>' : ` · цель ${s.required}`;
+      return `<div class="card skill"><div><b title="${h(s.original)}">${levelIcon(s.current)} ${h(s.name)}</b>
+        <div class="small muted">${h(levels[s.current])} · уровень ${s.current}${goal}${s.critical ? " · обязателен" : ""}</div></div>
         <div class="dots" title="Уровень ${s.current} из 5">${dots}</div></div>`;
     })
     .join("");
-  return `<h2>Навыки</h2><p class="small muted">Точки — текущий уровень из 5, золотая обводка — уровень, нужный для цели.</p>
+  const legend = LEVEL_ICONS.map(([, icon, text]) => `<span class="chip">${icon} ${text}</span>`).join("");
+  return `<h2>Навыки</h2>
+    <div class="legend">${legend}<span class="chip"><span class="dot on"></span> уровень из 5</span>
+      <span class="chip"><span class="dot target"></span> уровень, нужный для цели</span><span class="chip"><span class="ok">✓</span> цель по навыку достигнута</span></div>
     <div class="grid grid-2">${cards}</div>`;
 }
 
@@ -350,10 +377,13 @@ function historyView() {
   const rows = state.profile.history
     .map(
       (r) => `<tr><td>${date(r.date)}</td><td>${h(r.title)}</td>
-      <td><span class="status ${h(r.status)}">${h(r.status_label)}</span></td><td>${r.completion_pct}%</td></tr>`,
+      <td><span class="status ${h(r.status)}">${STATUS_ICONS[r.status] || ""} ${h(r.status_label)}</span></td><td>${r.completion_pct}%</td></tr>`,
     )
     .join("");
-  return `<h2>История участия</h2>
+  const legend = `<div class="legend">
+    <span class="status completed">✓ завершено</span><span class="status in_progress">⏳ идёт сейчас</span>
+    <span class="status overdue">⚠ просрочено</span><span class="status no_show">✕ пропуск, отказ или прекращено</span></div>`;
+  return `<h2>История участия</h2>${legend}
     <div class="card" style="padding:6px 10px">${
       rows
         ? `<table><thead><tr><th>Дата</th><th>Активность</th><th>Статус</th><th>Прогресс</th></tr></thead><tbody>${rows}</tbody></table>`

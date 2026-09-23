@@ -115,13 +115,13 @@ def _garden(dataset: Dataset, employee: Employee) -> None:
     target = target_profile(dataset, employee.employee_id)
     levels = effective_skills(dataset, employee.employee_id)
     st.subheader("Ваш сад навыков")
-    st.caption("Каждый цветок — навык. Рост отражает уровень, а цветение — достижение цели по этому навыку.")
+    st.caption("🌱 начальный уровень (0–1) · 🌿 средний (2–3) · 🌸 высокий (4–5). ✓ — цель по навыку достигнута.")
     identifiers = list(target.required_skills) if target else list(levels)
     columns = st.columns(3)
     for index, identifier in enumerate(identifiers):
         current = levels.get(identifier, 0)
         required = target.required_skills[identifier] if target else None
-        icon = "🌸" if required is not None and current >= required else ("🌿" if current >= 2 else "🌱")
+        icon = "🌸" if current >= 4 else ("🌿" if current >= 2 else "🌱")  # absolute level, as in the web client
         original = f"{dataset.skill(identifier).name} · {identifier} · сейчас {current}/5"
         if required is not None:
             original += f" · цель {required}/5"
