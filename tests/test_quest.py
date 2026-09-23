@@ -1,7 +1,7 @@
 from test_scoring import SENIOR_BACKEND, dataset, make_employee, with_history
 
 from career_quest.data import Dataset
-from career_quest.quest import build_quest
+from career_quest.quest import build_quest, coverage_gain
 from career_quest.scoring import complete_activity
 
 __all__ = ["dataset"]
@@ -55,3 +55,14 @@ def test_comeback_badge_after_completing_a_skipped_skill(dataset: Dataset) -> No
 
     assert quest is not None
     assert "comeback" in quest.badges
+
+
+def test_coverage_gain_counts_only_levels_up_to_the_requirement(dataset: Dataset) -> None:
+    ds = dataset.with_additions([make_employee(dataset, skills={**SENIOR_BACKEND, "SK_SYSTEM_DESIGN": 2})], [])
+    quest = build_quest(ds, "T0001")
+    assert quest is not None
+    total = sum(SENIOR_BACKEND.values())
+
+    gain = coverage_gain(quest, {"SK_SYSTEM_DESIGN": (2, 3), "SK_OBSERVABILITY": (3, 4), "SK_REACT": (0, 1)})
+
+    assert gain == 1 / total
