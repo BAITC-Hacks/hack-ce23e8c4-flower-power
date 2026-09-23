@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Hackathon repo for team **la(rp)-peace**. Python 3.12, managed with `uv`.
+Hackathon repo for team **Flower Power**. Python 3.12, managed with `uv`.
 
 Read these before doing anything:
 

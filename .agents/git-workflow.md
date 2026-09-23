@@ -196,8 +196,8 @@ Before you merge to `main`:
 - [ ] Rebased onto current `origin/main`
 - [ ] `uv run ruff format --check .` passes
 - [ ] `uv run ruff check .` passes
-- [ ] `uv run mypy .` passes *(will pass once the first module exists)*
-- [ ] `uv run pytest` passes *(will pass once the first test exists)*
+- [ ] `uv run mypy .` passes
+- [ ] `uv run pytest` passes
 - [ ] Commit messages follow Conventional Commits
 - [ ] Code follows [`guidelines.md`](guidelines.md)
 - [ ] One teammate approved, or the ten-minute SLA elapsed

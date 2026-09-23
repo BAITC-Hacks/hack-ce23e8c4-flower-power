@@ -118,19 +118,12 @@ Ignored rules (with justification):
 
 ## Project Layout
 
-Python 3.12. Currently a **non-package project** (`package = false`) -- there is no
-importable package yet, because the project scope is not defined. When code lands:
+Python 3.12. The installable `career_quest` package is built with Hatchling.
+The package and `tests/` now exist; all four validation commands below must pass.
+`known-first-party = ["career_quest"]` and `testpaths = ["tests"]` are configured.
 
-- Add the package (and a `[build-system]`, dropping `package = false` if it should be
-  installable), then set `known-first-party` under `[tool.ruff.lint.isort]`.
-- Add `tests/` and set `testpaths = ["tests"]` under `[tool.pytest.ini_options]`.
-- If the project becomes a `uv` workspace, run `mypy` once per member instead of once
-  at the root.
-
-**Until then, two of the four checks in step 1 fail for lack of code, not for lack of
-correctness:** `mypy .` exits 2 (`no .py[i] files`) and `pytest` exits 5 (no tests
-collected). Both must go green with the first real module and its test. Do not silence
-them with stub modules or empty test files -- see Mandatory Agent Rule 1.
+The official hackathon dataset belongs in ignored `data/local/`. Do not commit it.
+Tests use the authored synthetic examples in `career_quest/demo.py`.
 
 ## Validation & Git Workflow
 
