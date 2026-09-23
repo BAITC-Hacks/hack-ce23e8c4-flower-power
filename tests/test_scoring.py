@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from career_quest.data import Dataset, DatasetError, load_dataset, parse_history
+from career_quest.data import Dataset, DatasetError, load_dataset, parse_employees, parse_history
 from career_quest.models import CareerGoal, Employee, Grade
 from career_quest.scoring import (
     MIN_FACTORS,
@@ -16,6 +16,7 @@ from career_quest.scoring import (
 )
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+DEMO_DIR = Path(__file__).resolve().parents[1] / "demo"
 HEADER = "record_id,employee_id,event_id,date,due_date,status,completion_pct,score,feedback_rating,assigned_by\n"
 REVIEW_DATE = dt.date(2026, 6, 1)
 # Backend Engineer Senior requirements; trap profiles start from them and open specific gaps.
@@ -353,3 +354,28 @@ def test_complete_activity_rejects_invalid_events(dataset: Dataset, event_id: st
 
     with pytest.raises(DatasetError, match=message):
         complete_activity(ds, "T0001", event_id)
+
+
+@pytest.mark.parametrize(
+    ("employee_id", "lowest_skill", "expected_skills"),
+    [
+        ("TRAP_1", "SK_PUBLIC_SPEAKING", {"SK_SYSTEM_DESIGN"}),
+        ("TRAP_2", "SK_CLOUD", {"SK_AB_TESTING", "SK_STATISTICS"}),
+        ("TRAP_3", "SK_PUBLIC_SPEAKING", {"SK_SYSTEM_DESIGN"}),
+    ],
+)
+def test_demo_trap_files_defeat_the_lowest_skill_rule(
+    dataset: Dataset, employee_id: str, lowest_skill: str, expected_skills: set[str]
+) -> None:
+    ds = dataset.with_additions(
+        parse_employees((DEMO_DIR / "trap_employees.json").read_bytes()),
+        parse_history((DEMO_DIR / "trap_history.csv").read_bytes()),
+    )
+    reviewed = ds.employee(employee_id).skills
+
+    recs = recommend(ds, employee_id)
+
+    assert min(reviewed, key=reviewed.__getitem__) == lowest_skill
+    assert recs
+    assert lowest_skill not in recs[0].skill_changes
+    assert expected_skills & set(recs[0].skill_changes)

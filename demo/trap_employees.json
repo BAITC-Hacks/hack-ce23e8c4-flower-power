@@ -1,0 +1,109 @@
+{
+  "meta": {
+    "dataset": "Career Quest trap profiles",
+    "as_of_date": "2026-10-01"
+  },
+  "employees": [
+    {
+      "employee_id": "TRAP_1",
+      "full_name": "Trap 1 — skipped public speaking",
+      "department": "Backend Development",
+      "role": "Backend Engineer",
+      "grade": "Middle",
+      "manager_id": "E0050",
+      "hire_date": "2023-03-01",
+      "tenure_months": 43,
+      "work_format": "hybrid",
+      "preferred_language": "ru",
+      "career_goal": null,
+      "skills": {
+        "SK_PYTHON": 4,
+        "SK_SQL": 4,
+        "SK_API_DESIGN": 4,
+        "SK_SYSTEM_DESIGN": 2,
+        "SK_CLOUD": 3,
+        "SK_CONTAINERS": 3,
+        "SK_CICD": 3,
+        "SK_APP_SECURITY": 3,
+        "SK_OBSERVABILITY": 3,
+        "SK_COMMUNICATION": 3,
+        "SK_TEAMWORK": 3,
+        "SK_PROBLEM_SOLVING": 4,
+        "SK_MENTORING": 3,
+        "SK_LEADERSHIP": 2,
+        "SK_STAKEHOLDER_MGMT": 2,
+        "SK_PUBLIC_SPEAKING": 0
+      },
+      "last_review_date": "2026-06-01"
+    },
+    {
+      "employee_id": "TRAP_2",
+      "full_name": "Trap 2 — goal in another role",
+      "department": "Backend Development",
+      "role": "Backend Engineer",
+      "grade": "Middle",
+      "manager_id": "E0050",
+      "hire_date": "2023-03-01",
+      "tenure_months": 43,
+      "work_format": "hybrid",
+      "preferred_language": "ru",
+      "career_goal": {
+        "target_role": "Data Analyst",
+        "target_grade": "Senior"
+      },
+      "skills": {
+        "SK_PYTHON": 4,
+        "SK_SQL": 4,
+        "SK_API_DESIGN": 4,
+        "SK_SYSTEM_DESIGN": 4,
+        "SK_CLOUD": 0,
+        "SK_CONTAINERS": 3,
+        "SK_CICD": 3,
+        "SK_APP_SECURITY": 3,
+        "SK_OBSERVABILITY": 3,
+        "SK_COMMUNICATION": 3,
+        "SK_TEAMWORK": 3,
+        "SK_PROBLEM_SOLVING": 4,
+        "SK_MENTORING": 3,
+        "SK_LEADERSHIP": 2,
+        "SK_STAKEHOLDER_MGMT": 2,
+        "SK_PUBLIC_SPEAKING": 2,
+        "SK_STATISTICS": 2,
+        "SK_AB_TESTING": 1
+      },
+      "last_review_date": "2026-06-01"
+    },
+    {
+      "employee_id": "TRAP_3",
+      "full_name": "Trap 3 — stale review",
+      "department": "Backend Development",
+      "role": "Backend Engineer",
+      "grade": "Middle",
+      "manager_id": "E0050",
+      "hire_date": "2023-03-01",
+      "tenure_months": 43,
+      "work_format": "hybrid",
+      "preferred_language": "ru",
+      "career_goal": null,
+      "skills": {
+        "SK_PYTHON": 4,
+        "SK_SQL": 4,
+        "SK_API_DESIGN": 4,
+        "SK_SYSTEM_DESIGN": 3,
+        "SK_CLOUD": 3,
+        "SK_CONTAINERS": 3,
+        "SK_CICD": 3,
+        "SK_APP_SECURITY": 3,
+        "SK_OBSERVABILITY": 3,
+        "SK_COMMUNICATION": 3,
+        "SK_TEAMWORK": 3,
+        "SK_PROBLEM_SOLVING": 4,
+        "SK_MENTORING": 3,
+        "SK_LEADERSHIP": 2,
+        "SK_STAKEHOLDER_MGMT": 2,
+        "SK_PUBLIC_SPEAKING": 0
+      },
+      "last_review_date": "2026-06-01"
+    }
+  ]
+}
