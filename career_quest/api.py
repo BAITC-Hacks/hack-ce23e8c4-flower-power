@@ -8,18 +8,20 @@ dataset on the server (progress survives page reloads while the server runs). Ac
 import os
 import secrets
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Annotated, Any, Literal
 
 import structlog
 from fastapi import Cookie, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from career_quest.access import Viewer, authenticate, can_view_employee, configured_access, require_hr
-from career_quest.coach import set_goal, suggest_goal
+from career_quest.assistant import answer
+from career_quest.coach import set_goal
 from career_quest.data import Dataset, DatasetError, load_dataset
 from career_quest.explain import explain, llm_configured
 from career_quest.factor_text import russian_detail
@@ -53,6 +55,10 @@ Role = Literal["employee", "hr"]
 class _Session:
     viewer: Viewer | None
     dataset: Dataset
+    ai_cache: dict[str, Any] = field(default_factory=dict)
+    dialogue: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    ai_calls: int = 0
+    ai_lock: Any = field(default_factory=Lock)
 
 
 _BASE: dict[str, Dataset] = {}
@@ -71,7 +77,8 @@ class LoginBody(BaseModel):
 class WishBody(BaseModel):
     """Free-text career wish for the coach."""
 
-    wish: str
+    wish: str = Field(min_length=1, max_length=500)
+    language: Language = "ru"
 
 
 class GoalBody(BaseModel):
@@ -328,6 +335,8 @@ def complete(employee_id: str, body: EventBody, response: Response, cq_session: 
     except DatasetError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     session.dataset = updated
+    session.ai_cache.clear()
+    session.dialogue.clear()
     after, new_quest = effective_skills(updated, employee_id), build_quest(updated, employee_id)
     earned = [c for c in (new_quest.badges if new_quest else []) if not old_quest or c not in old_quest.badges]
     return {
@@ -350,24 +359,55 @@ def explanation(
     rec = next((r for r in recommend(session.dataset, employee_id) if r.event_id == body.event_id), None)
     if rec is None:
         raise HTTPException(status_code=404, detail="Рекомендация не найдена")
-    return {"text": explain(rec, employee, body.language)}
+    key = f"explain:{employee_id}:{employee.role}:{employee.grade}:{body.language}:{rec.model_dump_json()}"
+    with session.ai_lock:
+        if key not in session.ai_cache:
+            if session.ai_calls >= 40 and llm_configured():
+                raise HTTPException(status_code=429, detail="Лимит AI-запросов этой сессии исчерпан")
+            session.ai_calls += int(llm_configured())
+            session.ai_cache[key] = {"text": explain(rec, employee, body.language)}
+        return dict(session.ai_cache[key])
 
 
 @app.post("/api/employees/{employee_id}/coach")
 def coach(employee_id: str, body: WishBody, response: Response, cq_session: SessionCookie = None) -> dict[str, Any]:
     """Turn a free-text wish into a catalog career goal."""
+    return assistant_reply(employee_id, body, response, cq_session)
+
+
+@app.post("/api/employees/{employee_id}/assistant")
+def assistant_reply(
+    employee_id: str, body: WishBody, response: Response, cq_session: SessionCookie = None
+) -> dict[str, Any]:
+    """Analyze one profile with bounded dialogue, deduplication and explicit provenance."""
     session = _session(response, cq_session)
     _employee_for(session, employee_id)
     _require_own_goal(session)
-    suggestion = suggest_goal(session.dataset, employee_id, body.wish, "ru")
-    if suggestion is None:
-        return {"suggestion": None}
-    return {
-        "suggestion": {
-            **suggestion.model_dump(),
-            "label": _role_label(suggestion.target_role, suggestion.target_grade),
-        }
-    }
+    if not body.wish.strip():
+        raise HTTPException(status_code=422, detail="Напишите вопрос о карьерном развитии")
+    with session.ai_lock:
+        history = session.dialogue.setdefault(employee_id, [])
+        key = f"assistant:{id(session.dataset)}:{employee_id}:{body.language}:{body.wish.strip()}"
+        if history and history[-1].get("request_key") == key:
+            return dict(session.ai_cache[key])
+        reply = answer(
+            session.dataset,
+            employee_id,
+            body.wish,
+            body.language,
+            [{"role": row["role"], "text": row["text"]} for row in history[-6:]],
+            allow_ai=session.ai_calls < 40,
+        )
+        session.ai_calls += int(llm_configured() and session.ai_calls < 40)
+        result = reply.model_dump()
+        if reply.suggestion:
+            result["suggestion"]["label"] = _role_label(reply.suggestion.target_role, reply.suggestion.target_grade)
+        history.extend(
+            [{"role": "user", "text": body.wish}, {"role": "assistant", "text": reply.text[:1800], "request_key": key}]
+        )
+        session.dialogue[employee_id] = history[-6:]
+        session.ai_cache[key] = result
+        return result
 
 
 @app.post("/api/employees/{employee_id}/goal")
@@ -380,6 +420,8 @@ def goal(employee_id: str, body: GoalBody, response: Response, cq_session: Sessi
         session.dataset = set_goal(session.dataset, employee_id, CareerGoal(**body.model_dump()))
     except KeyError as exc:
         raise HTTPException(status_code=400, detail="Такой роли нет в справочнике") from exc
+    session.ai_cache.clear()
+    session.dialogue.clear()
     return {"goal": _role_label(body.target_role, body.target_grade)}
 
 
@@ -454,6 +496,8 @@ async def add_data(
     raw_employees = await employees_file.read() if employees_file else b""
     raw_history = await history_file.read() if history_file else b""
     session.dataset = import_additions(viewer, session.dataset, raw_employees, raw_history)
+    session.ai_cache.clear()
+    session.dialogue.clear()
     return {"employees": len(session.dataset.employees), "records": len(session.dataset.history)}
 
 
@@ -466,6 +510,8 @@ async def replace_data(
     viewer = _viewer(session)
     uploads = {file.filename or "": await file.read() for file in files}
     session.dataset = import_snapshot(viewer, {name: uploads[name] for name in FILENAMES if name in uploads})
+    session.ai_cache.clear()
+    session.dialogue.clear()
     return {"employees": len(session.dataset.employees), "records": len(session.dataset.history)}
 
 

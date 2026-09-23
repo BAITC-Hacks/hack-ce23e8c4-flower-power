@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from career_quest import api
+from career_quest.assistant import answer
 
 DEMO_DIR = Path(__file__).resolve().parents[1] / "demo"
 
@@ -144,3 +145,58 @@ def test_factor_details_are_translated(client: TestClient) -> None:
     assert factors
     for factor in factors:
         assert not any(word in factor["detail_ru"] for word in ("required", "Designed", "earlier", "Takes", "session"))
+
+
+def test_assistant_repeated_request_is_cached_and_does_not_mutate_goal(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login(client, role="employee")
+    original = answer
+    calls: list[str] = []
+
+    def tracked(*args: object, **kwargs: object) -> object:
+        calls.append("call")
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(api, "answer", tracked)
+    body = {"wish": "Каких навыков мне не хватает?", "language": "ru"}
+    first = client.post("/api/employees/E0001/assistant", json=body)
+    second = client.post("/api/employees/E0001/assistant", json=body)
+    assert first.status_code == 200
+    assert first.json()["text"]
+    assert first.json() == second.json()
+    assert calls == ["call"]
+    other = client.post("/api/employees/E0002/assistant", json=body)
+    assert other.status_code == 200
+    assert len(calls) == 2
+
+
+def test_assistant_rejects_blank_and_oversized_input(client: TestClient) -> None:
+    login(client, role="employee")
+    for wish in ("   ", "x" * 501):
+        assert client.post("/api/employees/E0001/assistant", json={"wish": wish}).status_code == 422
+
+
+def test_assistant_uses_access_control(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CQ_EMPLOYEE_ID", "E0005")
+    monkeypatch.setenv("CQ_EMPLOYEE_PASSWORD", "employee-pass")
+    monkeypatch.setenv("CQ_HR_PASSWORD", "hr-pass")
+    login(client, role="employee", password="employee-pass")  # noqa: S106 - test secret
+    assert client.post("/api/employees/E0001/assistant", json={"wish": "Анализ навыков"}).status_code == 403
+
+
+def test_explanations_are_cached_per_profile(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    login(client)
+    calls: list[str] = []
+
+    def fake_explain(*args: object) -> str:
+        del args
+        calls.append("call")
+        return "Saved explanation"
+
+    monkeypatch.setattr(api, "explain", fake_explain)
+    event = client.get("/api/employees/E0001").json()["recommendations"][0]["event_id"]
+    for _ in range(2):
+        response = client.post("/api/employees/E0001/explain", json={"event_id": event})
+        assert response.json()["text"] == "Saved explanation"
+    assert calls == ["call"]

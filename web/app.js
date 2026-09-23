@@ -10,6 +10,8 @@ const state = {
   lang: "ru",
   explanations: {},
   suggestion: undefined,
+  dialogue: [],
+  wish: "",
   loginRole: "employee",
   busy: "",
 };
@@ -91,6 +93,10 @@ async function loadSession() {
 }
 
 async function loadProfile(id) {
+  state.explanations = {};
+  state.suggestion = undefined;
+  state.dialogue = [];
+  state.wish = "";
   state.profile = await api(`/api/employees/${encodeURIComponent(id)}`);
   state.profileId = id;
 }
@@ -200,7 +206,7 @@ function sidebar(page, id) {
     }
     <div class="side-footer">
       ${state.session.demo ? '<span class="pill warn">Демо-режим</span>' : ""}
-      <span class="pill">${state.session.ai ? "🤖 AI подключён" : "Офлайн-режим, без AI"}</span>
+      <span class="pill">${state.session.ai ? "🤖 AI настроен · проверяется при запросе" : "Офлайн-режим, без AI"}</span>
       <span>Дата среза: ${date(state.session.as_of_date)}</span>
       <span>Роль: ${hr ? "HR" : "сотрудник"} · <button class="link-button" data-action="logout">выйти</button></span>
     </div>
@@ -280,12 +286,13 @@ function coachView() {
   <section class="card coach">
     <div class="coach-avatar">🤖</div>
     <div>
-      <b>AI-коуч: кем вы хотите стать?</b>
-      <div class="small muted">Напишите своими словами — на русском, қазақша или English. Цель выбирается только из справочника ролей;
-      в AI уходят лишь ваш текст и текущая роль.</div>
+      <b>Карьерный помощник: разберём ваш следующий шаг</b>
+      <div class="small muted">Спросите о навыках, причинах рекомендации, альтернативах или новой цели — на русском, қазақша или English.
+      AI получает ваш вопрос, последние сообщения и расчётные факты профиля, без имени. Цель меняется только после подтверждения.</div>
+      <div aria-live="polite">${state.dialogue.map(m => `<div class="explain"><b>${m.role === "user" ? "Вы" : "Помощник"}</b><br>${h(m.text)}</div>`).join("")}</div>
       <form data-action="coach">
-        <input class="input" name="wish" maxlength="500" placeholder="Например: хочу через год стать тимлидом в аналитике" required>
-        <button class="btn btn-primary" type="submit">${state.busy === "coach" ? spinner : "Подобрать"}</button>
+        <input class="input" name="wish" data-action="wish" value="${h(state.wish)}" maxlength="500" placeholder="Каких навыков мне не хватает? Почему выбран этот курс?" required>
+        <button class="btn btn-primary" type="submit">${state.busy === "coach" ? spinner : "Спросить"}</button>
       </form>
       ${result}
     </div>
@@ -293,7 +300,7 @@ function coachView() {
 }
 
 function recommendationView(rec, top) {
-  const key = `${rec.event_id}:${state.lang}`;
+  const key = `${state.profileId}:${rec.event_id}:${state.lang}`;
   const explanation = state.explanations[key];
   const factors = rec.factors
     .map(
@@ -451,6 +458,7 @@ function dataView() {
 
 // ---------- actions ----------
 async function withBusy(key, action) {
+  if (state.busy) return;
   state.busy = key;
   await render();
   try {
@@ -480,7 +488,7 @@ const actions = {
   },
   logout: async () => {
     await api("/api/session", { method: "DELETE" });
-    Object.assign(state, { session: null, employees: [], profile: null, profileId: null, hr: null, explanations: {} });
+    Object.assign(state, { session: null, employees: [], profile: null, profileId: null, hr: null, explanations: {}, dialogue: [], suggestion: undefined, wish: "" });
     location.hash = "";
     render();
   },
@@ -488,13 +496,15 @@ const actions = {
     withBusy("hr", async () => {
       state.hr = null;
     }),
-  explain: (el) =>
-    withBusy(`explain:${el.dataset.event}`, async () => {
-      const result = await api(`/api/employees/${encodeURIComponent(state.profileId)}/explain`, {
-        json: { event_id: el.dataset.event, language: state.lang },
+  explain: (el) => {
+    const employeeId = state.profileId, eventId = el.dataset.event, language = state.lang;
+    return withBusy(`explain:${eventId}`, async () => {
+      const result = await api(`/api/employees/${encodeURIComponent(employeeId)}/explain`, {
+        json: { event_id: eventId, language },
       });
-      state.explanations[`${el.dataset.event}:${state.lang}`] = result.text;
-    }),
+      if (state.profileId === employeeId) state.explanations[`${employeeId}:${eventId}:${language}`] = result.text;
+    });
+  },
   complete: (el) =>
     withBusy(`complete:${el.dataset.event}`, async () => {
       const result = await api(`/api/employees/${encodeURIComponent(state.profileId)}/complete`, {
@@ -533,10 +543,17 @@ const forms = {
       location.hash = defaultRoute();
     }),
   coach: (form) => {
-    const wish = form.wish.value;
+    const wish = form.wish.value.trim();
+    const employeeId = state.profileId;
+    const language = state.lang;
+    if (!wish) return;
     return withBusy("coach", async () => {
-      const result = await api(`/api/employees/${encodeURIComponent(state.profileId)}/coach`, { json: { wish } });
-      state.suggestion = result.suggestion;
+      const result = await api(`/api/employees/${encodeURIComponent(employeeId)}/assistant`, { json: { wish, language } });
+      if (state.profileId !== employeeId) return;
+      state.dialogue.push({ role: "user", text: wish }, { role: "assistant", text: result.text });
+      state.dialogue = state.dialogue.slice(-6);
+      state.wish = "";
+      state.suggestion = result.suggestion || undefined;
     });
   },
   additions: (form) => {
@@ -581,6 +598,7 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target.dataset.action === "wish") state.wish = event.target.value;
   if (event.target.dataset.action === "filter") {
     state.filter = event.target.value;
     const position = event.target.selectionStart;
