@@ -39,6 +39,8 @@ ENGAGEMENT_CAP = 2
 GOOD_FEEDBACK = 4.0
 POOR_FEEDBACK = 2.0
 RECURRING_EVENT_ID = "EV_036"
+# Record ids of completions marked in the app; they happened after any review, even one dated today.
+SIMULATED_PREFIX = "SIM-"
 NEGATIVE_STATUSES = frozenset({"no_show", "dropped", "declined"})
 
 
@@ -95,6 +97,8 @@ def effective_skills(ds: Dataset, employee_id: str) -> dict[str, int]:
 
     The profile holds levels from the last review. Gains of events completed strictly after
     ``last_review_date`` (and not after the snapshot date) are applied on top, in date order.
+    Completions marked in the app (``SIMULATED_PREFIX``) are always applied, even when the review is
+    dated on the snapshot day. Duplicate completions of one event on one day count once.
     Skills absent from the profile start at level 0 and appear in the result only once raised.
 
     Args:
@@ -106,11 +110,15 @@ def effective_skills(ds: Dataset, employee_id: str) -> dict[str, int]:
     """
     employee = ds.employee(employee_id)
     levels = dict(employee.skills)
+    applied: set[tuple[str, dt.date]] = set()
     for record in ds.history_for(employee_id):
-        if record.status != "completed":
+        key = (record.event_id, record.session_date)
+        if record.status != "completed" or key in applied:
             continue
-        if not employee.last_review_date < record.session_date <= ds.as_of_date:
+        simulated = record.record_id.startswith(SIMULATED_PREFIX)
+        if not (simulated or employee.last_review_date < record.session_date) or record.session_date > ds.as_of_date:
             continue
+        applied.add(key)
         for gain in ds.event(record.event_id).develops_skills:
             levels[gain.skill_id] = _apply_gain(levels.get(gain.skill_id, 0), gain)
     return levels
@@ -193,8 +201,9 @@ def complete_activity(ds: Dataset, employee_id: str, event_id: str) -> Dataset:
         A new dataset with a ``completed`` self-initiated record dated ``ds.as_of_date``.
 
     Raises:
-        DatasetError: If the employee or event is unknown, the event is mandatory, or it was already
-            completed and is not the recurring club.
+        DatasetError: If the employee or event is unknown, the event is mandatory, it was already
+            completed and is not the recurring club, or it is already marked completed today
+            (a repeated click, not a new session).
     """
     try:
         ds.employee(employee_id)
@@ -203,15 +212,19 @@ def complete_activity(ds: Dataset, employee_id: str, event_id: str) -> Dataset:
         raise DatasetError(f"unknown employee or event: {exc}") from exc
     if event.mandatory:
         raise DatasetError(f"{event_id} is mandatory and is not tracked as a development activity")
-    records = ds.history_for(employee_id)
-    if event_id != RECURRING_EVENT_ID and any(r.event_id == event_id and r.status == "completed" for r in records):
+    completed_on = {
+        r.session_date for r in ds.history_for(employee_id) if r.event_id == event_id and r.status == "completed"
+    }
+    if ds.as_of_date in completed_on:
+        raise DatasetError(f"{event_id} is already completed by {employee_id} on {ds.as_of_date}")
+    if event_id != RECURRING_EVENT_ID and completed_on:
         raise DatasetError(f"{event_id} is already completed by {employee_id}")
     taken = {record.record_id for record in ds.history}
     number = 1
-    while f"SIM-{employee_id}-{event_id}-{number}" in taken:
+    while f"{SIMULATED_PREFIX}{employee_id}-{event_id}-{number}" in taken:
         number += 1
     record = ActivityRecord(
-        record_id=f"SIM-{employee_id}-{event_id}-{number}",
+        record_id=f"{SIMULATED_PREFIX}{employee_id}-{event_id}-{number}",
         employee_id=employee_id,
         event_id=event_id,
         session_date=ds.as_of_date,
