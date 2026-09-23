@@ -1,4 +1,4 @@
-"""Russian display labels for dataset codes, shared by the web app and the Streamlit fallback."""
+"""Russian display labels for dataset codes, used by the web API."""
 
 STATUS_LABELS = {
     "completed": "Завершено",

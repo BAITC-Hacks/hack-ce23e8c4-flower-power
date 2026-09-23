@@ -13,7 +13,6 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY career_quest ./career_quest
 RUN uv sync --locked --no-dev
-COPY app.py ./
 COPY web ./web
 COPY data/employees.json data/events.json data/skills.json data/activity_history.csv ./data/
 RUN groupadd --system careerquest && useradd --system --gid careerquest --home-dir /app careerquest

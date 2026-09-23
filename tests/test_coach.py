@@ -1,9 +1,7 @@
 import json
-from pathlib import Path
 from typing import Any
 
 import pytest
-from streamlit.testing.v1 import AppTest
 from test_scoring import dataset, make_employee
 
 from career_quest import coach
@@ -90,19 +88,3 @@ def test_set_goal_changes_target_and_recommendations(ds: Dataset) -> None:
 def test_set_goal_rejects_unknown_profile(ds: Dataset) -> None:
     with pytest.raises(KeyError):
         coach.set_goal(ds, "T0001", CareerGoal(target_role="Astronaut", target_grade="Lead"))
-
-
-def test_coach_sets_goal_in_the_app(monkeypatch: pytest.MonkeyPatch) -> None:
-    for variable in ("CQ_EMPLOYEE_ID", "CQ_EMPLOYEE_PASSWORD", "CQ_HR_PASSWORD", "OPENAI_API_KEY", "CQ_DATA_DIR"):
-        monkeypatch.delenv(variable, raising=False)
-    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=30).run()
-    identifier = app.session_state["dataset"].employees[0].employee_id
-
-    app.text_input[0].input("хочу стать тимлидом в аналитике").run()
-    next(button for button in app.button if button.label == "Спросить").click().run()
-    app.button(key=f"set_goal_{identifier}").click().run()
-
-    assert not app.exception
-    goal = app.session_state["dataset"].employee(identifier).career_goal
-    assert (goal.target_role, goal.target_grade) == ("Data Analyst", "Lead")
-    assert any("Цель обновлена" in message.value for message in app.success)
