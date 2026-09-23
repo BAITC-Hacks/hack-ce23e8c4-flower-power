@@ -1,0 +1,6 @@
+record_id,employee_id,event_id,date,due_date,status,completion_pct,score,feedback_rating,assigned_by
+TRAP_R01,TRAP_1,EV_036,2026-02-11,,no_show,0,,,self
+TRAP_R02,TRAP_1,EV_036,2026-03-11,,no_show,0,,,self
+TRAP_R03,TRAP_1,EV_036,2026-04-08,,dropped,40,,,self
+TRAP_R04,TRAP_3,EV_036,2026-07-08,,completed,100,,,self
+TRAP_R05,TRAP_3,EV_036,2026-08-12,,completed,100,,,self
